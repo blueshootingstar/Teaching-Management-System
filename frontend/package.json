@@ -1,0 +1,30 @@
+{
+  "name": "teaching-management-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 5173",
+    "verify:chart": "node scripts/verify-student-chart.mjs"
+  },
+  "dependencies": {
+    "@ant-design/icons": "^6.0.0",
+    "@vitejs/plugin-react": "^5.0.4",
+    "antd": "^5.27.6",
+    "axios": "^1.12.2",
+    "dayjs": "^1.11.13",
+    "echarts": "^6.0.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router-dom": "^7.9.4",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2"
+  }
+}

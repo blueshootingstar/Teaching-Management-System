@@ -1,0 +1,229 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f5f7fb;
+  color: #1f2937;
+}
+
+.app-shell {
+  min-height: 100vh;
+  background: #f5f7fb;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: auto;
+  min-height: 60px;
+  padding: 10px 30px;
+  background: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+  line-height: 1.2;
+}
+
+.app-brand {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+
+.app-title {
+  display: block;
+  color: #111827;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.app-subtitle {
+  display: none;
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.app-user {
+  flex-shrink: 0;
+}
+
+.app-user-name {
+  color: #374151;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.app-content {
+  padding: 24px;
+  background: #f5f7fb;
+}
+
+.page-card {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    linear-gradient(rgba(245, 247, 251, 0.86), rgba(245, 247, 251, 0.86)),
+    url('https://images.unsplash.com/photo-1523240795612-9a054b0db644?auto=format&fit=crop&w=1600&q=80') center/cover;
+}
+
+.login-card {
+  width: min(420px, 100%);
+  border-radius: 8px;
+}
+
+.login-form {
+  margin-top: 24px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.course-filter-bar {
+  width: 100%;
+  margin-bottom: 16px;
+}
+
+.schedule-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.schedule-table {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.schedule-table th,
+.schedule-table td {
+  min-height: 86px;
+  padding: 10px;
+  vertical-align: top;
+  border: 1px solid #e5e7eb;
+}
+
+.schedule-table th {
+  width: 110px;
+  background: #f8fafc;
+  color: #374151;
+  font-weight: 600;
+  text-align: center;
+}
+
+.schedule-table td {
+  background: #ffffff;
+}
+
+.schedule-course {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 8px;
+  padding: 8px;
+  border-left: 3px solid #1677ff;
+  background: #eef6ff;
+  color: #1f2937;
+}
+
+.schedule-course strong,
+.schedule-course span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-course span {
+  color: #4b5563;
+  font-size: 12px;
+}
+
+.gpa-chart {
+  width: 100%;
+  height: 300px;
+  margin-bottom: 16px;
+}
+
+.teacher-chart-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(320px, 1.2fr);
+  gap: 24px;
+}
+
+.score-bar-row {
+  display: grid;
+  grid-template-columns: 72px 1fr 48px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.score-bar-label,
+.score-bar-count {
+  color: #4b5563;
+  font-size: 13px;
+}
+
+.score-bar-track {
+  height: 12px;
+  overflow: hidden;
+  background: #eef2f7;
+  border-radius: 6px;
+}
+
+.score-bar-fill {
+  height: 100%;
+  min-width: 4px;
+  background: #1677ff;
+  border-radius: 6px;
+}
+
+@media (max-width: 700px) {
+  .app-header {
+    min-height: 56px;
+    padding: 8px 12px;
+    gap: 10px;
+  }
+
+  .app-title {
+    font-size: 17px;
+  }
+
+  .app-user-name {
+    display: none;
+  }
+
+  .app-content {
+    padding: 12px;
+  }
+
+  .teacher-chart-grid {
+    grid-template-columns: 1fr;
+  }
+}
