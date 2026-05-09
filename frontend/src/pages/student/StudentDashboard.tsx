@@ -123,7 +123,6 @@ export default function StudentDashboard() {
       title: '容量',
       render: (_, record) => `${record.selected_count || 0}/${record.capacity || 0}`
     },
-    { title: '余量', dataIndex: 'remaining_capacity' },
     {
       title: '状态',
       render: (_, record) => (

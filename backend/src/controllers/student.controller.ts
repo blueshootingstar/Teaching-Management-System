@@ -91,18 +91,15 @@ export async function availableCourses(req: AuthenticatedRequest, res: Response)
       JOIN teacher AS t ON t.staff_id = c.staff_id
      LEFT JOIN course_selection AS cs
        ON cs.semester = c.semester AND cs.course_id = c.course_id AND cs.staff_id = c.staff_id
-      AND cs.selection_status = 'selected'
      LEFT JOIN course_selection AS mine
       ON mine.semester = c.semester AND mine.course_id = c.course_id AND mine.staff_id = c.staff_id
       AND mine.student_id = ?
-      AND mine.selection_status = 'selected'
-      LEFT JOIN grades AS g ON g.selection_id = mine.selection_id
+      LEFT JOIN v_grades AS g ON g.selection_id = mine.selection_id
       LEFT JOIN course_selection AS same_course
        ON same_course.semester = c.semester
       AND same_course.course_id = c.course_id
       AND same_course.staff_id <> c.staff_id
       AND same_course.student_id = ?
-      AND same_course.selection_status = 'selected'
       LEFT JOIN class AS same_class
        ON same_class.semester = same_course.semester
       AND same_class.course_id = same_course.course_id
@@ -110,7 +107,6 @@ export async function availableCourses(req: AuthenticatedRequest, res: Response)
       LEFT JOIN teacher AS same_teacher ON same_teacher.staff_id = same_class.staff_id
       LEFT JOIN course_selection AS time_selection
        ON time_selection.student_id = ?
-      AND time_selection.selection_status = 'selected'
       LEFT JOIN class AS time_class
        ON time_class.semester = time_selection.semester
       AND time_class.course_id = time_selection.course_id
@@ -160,7 +156,7 @@ export async function selectCourse(req: AuthenticatedRequest, res: Response) {
        FROM course_selection
          AS cs
        JOIN teacher AS t ON t.staff_id = cs.staff_id
-       WHERE cs.student_id = ? AND cs.semester = ? AND cs.course_id = ? AND cs.selection_status = 'selected'
+       WHERE cs.student_id = ? AND cs.semester = ? AND cs.course_id = ?
        LIMIT 1`,
       [studentId, offering.semester, offering.course_id]
     );
@@ -175,7 +171,7 @@ export async function selectCourse(req: AuthenticatedRequest, res: Response) {
     const [capacityRows] = await conn.query<RowDataPacket[]>(
       `SELECT COUNT(*) AS selected_count
        FROM course_selection
-       WHERE semester = ? AND course_id = ? AND staff_id = ? AND selection_status = 'selected'`,
+       WHERE semester = ? AND course_id = ? AND staff_id = ?`,
       [offering.semester, offering.course_id, offering.staff_id]
     );
     if (Number(capacityRows[0].selected_count) >= Number(offering.capacity)) {
@@ -191,7 +187,6 @@ export async function selectCourse(req: AuthenticatedRequest, res: Response) {
        JOIN course AS co ON co.course_id = c.course_id
        JOIN teacher AS t ON t.staff_id = c.staff_id
        WHERE cs.student_id = ?
-         AND cs.selection_status = 'selected'
          AND c.semester = ?
          AND c.class_time = ?
        LIMIT 1`,
@@ -204,8 +199,8 @@ export async function selectCourse(req: AuthenticatedRequest, res: Response) {
     }
 
     await conn.execute(
-      `INSERT INTO course_selection (student_id, semester, course_id, staff_id, score, selection_status)
-       VALUES (?, ?, ?, ?, NULL, 'selected')`,
+      `INSERT INTO course_selection (student_id, semester, course_id, staff_id)
+       VALUES (?, ?, ?, ?)`,
       [studentId, offering.semester, offering.course_id, offering.staff_id]
     );
     await conn.commit();
@@ -229,7 +224,7 @@ export async function dropCourse(req: AuthenticatedRequest, res: Response) {
     const [rows] = await conn.query<RowDataPacket[]>(
       `SELECT cs.selection_id, g.score
        FROM course_selection AS cs
-       LEFT JOIN grades AS g ON g.selection_id = cs.selection_id
+       LEFT JOIN v_grades AS g ON g.selection_id = cs.selection_id
        WHERE cs.selection_id = ? AND cs.student_id = ?
        FOR UPDATE`,
       [selectionId, studentId]
@@ -263,13 +258,13 @@ export async function myCourses(req: AuthenticatedRequest, res: Response) {
     `SELECT
        cs.selection_id, c.offering_id, c.semester, co.course_id, co.course_name,
        co.credit, c.staff_id, t.name AS teacher_name, c.class_time, c.classroom,
-       cs.selection_status, g.score
+       g.score
      FROM course_selection AS cs
      JOIN class AS c ON c.semester = cs.semester AND c.course_id = cs.course_id AND c.staff_id = cs.staff_id
      JOIN course AS co ON co.course_id = c.course_id
      JOIN teacher AS t ON t.staff_id = c.staff_id
-     LEFT JOIN grades AS g ON g.selection_id = cs.selection_id
-     WHERE cs.student_id = ? AND cs.selection_status = 'selected' AND c.semester = ?
+     LEFT JOIN v_grades AS g ON g.selection_id = cs.selection_id
+     WHERE cs.student_id = ? AND c.semester = ?
      ORDER BY c.semester DESC, c.class_time`,
     [studentId, semester]
   );
@@ -291,8 +286,8 @@ export async function myGrades(req: AuthenticatedRequest, res: Response) {
      JOIN class AS c ON c.semester = cs.semester AND c.course_id = cs.course_id AND c.staff_id = cs.staff_id
      JOIN course AS co ON co.course_id = c.course_id
      JOIN teacher AS t ON t.staff_id = c.staff_id
-     LEFT JOIN grades AS g ON g.selection_id = cs.selection_id
-     WHERE cs.student_id = ? AND cs.selection_status = 'selected'
+     LEFT JOIN v_grades AS g ON g.selection_id = cs.selection_id
+     WHERE cs.student_id = ?
      ORDER BY c.semester DESC, co.course_id`,
     [studentId]
   );

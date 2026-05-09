@@ -17,8 +17,8 @@ export async function studentStatistics(req: Request, res: Response) {
        ROUND(AVG(g.score), 2) AS average_score,
        SUM(co.credit) AS total_credit
      FROM student AS s
-     LEFT JOIN course_selection AS cs ON cs.student_id = s.student_id AND cs.selection_status = 'selected'
-     LEFT JOIN grades AS g ON g.selection_id = cs.selection_id AND g.score IS NOT NULL
+     LEFT JOIN course_selection AS cs ON cs.student_id = s.student_id
+     LEFT JOIN v_grades AS g ON g.selection_id = cs.selection_id AND g.score IS NOT NULL
      LEFT JOIN class AS c ON c.semester = cs.semester AND c.course_id = cs.course_id AND c.staff_id = cs.staff_id
      LEFT JOIN course AS co ON co.course_id = c.course_id
      WHERE s.student_id = ?
@@ -39,7 +39,6 @@ export async function teacherStatistics(req: Request, res: Response) {
      LEFT JOIN class AS c ON c.staff_id = t.staff_id
      LEFT JOIN course_selection AS cs
        ON cs.semester = c.semester AND cs.course_id = c.course_id AND cs.staff_id = c.staff_id
-      AND cs.selection_status = 'selected'
      WHERE t.staff_id = ?
      GROUP BY t.staff_id, t.name`,
     [req.params.teacherId]
@@ -61,7 +60,6 @@ export async function semesterStatistics(req: Request, res: Response) {
      JOIN teacher AS t ON t.staff_id = c.staff_id
      LEFT JOIN course_selection AS cs
        ON cs.semester = c.semester AND cs.course_id = c.course_id AND cs.staff_id = c.staff_id
-      AND cs.selection_status = 'selected'
      WHERE c.semester = ?
      GROUP BY c.offering_id, c.semester, co.course_id, co.course_name, t.name
      ORDER BY selected_count DESC, co.course_id`,
@@ -80,8 +78,7 @@ export async function courseRanking(_req: Request, res: Response) {
      JOIN class AS c ON c.course_id = co.course_id
      JOIN course_selection AS cs
        ON cs.semester = c.semester AND cs.course_id = c.course_id AND cs.staff_id = c.staff_id
-      AND cs.selection_status = 'selected'
-     JOIN grades AS g ON g.selection_id = cs.selection_id
+     JOIN v_grades AS g ON g.selection_id = cs.selection_id
      WHERE g.score IS NOT NULL
      GROUP BY co.course_id, co.course_name
      ORDER BY average_score DESC`

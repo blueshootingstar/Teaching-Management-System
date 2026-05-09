@@ -114,20 +114,15 @@ CREATE TABLE course_selection (
   semester CHAR(6) NOT NULL,
   course_id CHAR(8) NOT NULL,
   staff_id CHAR(4) NOT NULL,
-  score DECIMAL(5,2) NULL,
-  selection_status ENUM('selected','dropped') NOT NULL DEFAULT 'selected',
   selected_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  dropped_at DATETIME NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (student_id, semester, course_id, staff_id),
   UNIQUE KEY uk_course_selection_id (selection_id),
-  KEY idx_selection_student_status (student_id, selection_status),
-  KEY idx_selection_offering_lookup (semester, course_id, staff_id, selection_status),
+  KEY idx_selection_offering_lookup (semester, course_id, staff_id),
   CONSTRAINT fk_selection_student FOREIGN KEY (student_id) REFERENCES student (student_id),
   CONSTRAINT fk_selection_class FOREIGN KEY (semester, course_id, staff_id)
-    REFERENCES `class` (semester, course_id, staff_id),
-  CONSTRAINT chk_selection_score CHECK (score IS NULL OR (score >= 0 AND score <= 100))
+    REFERENCES `class` (semester, course_id, staff_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE users (
@@ -135,7 +130,6 @@ CREATE TABLE users (
   username VARCHAR(50) NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
   role ENUM('admin','teacher','student') NOT NULL,
-  display_name VARCHAR(50) NOT NULL,
   student_id CHAR(4) NULL,
   staff_id CHAR(4) NULL,
   status ENUM('active','disabled') NOT NULL DEFAULT 'active',
@@ -145,8 +139,8 @@ CREATE TABLE users (
   PRIMARY KEY (user_id),
   UNIQUE KEY uk_users_username (username),
   KEY idx_users_role (role),
-  KEY idx_users_student (student_id),
-  KEY idx_users_teacher (staff_id),
+  UNIQUE KEY uk_users_student (student_id),
+  UNIQUE KEY uk_users_teacher (staff_id),
   CONSTRAINT fk_users_student FOREIGN KEY (student_id) REFERENCES student (student_id),
   CONSTRAINT fk_users_teacher FOREIGN KEY (staff_id) REFERENCES teacher (staff_id),
   CONSTRAINT chk_users_role_binding CHECK (
@@ -156,21 +150,26 @@ CREATE TABLE users (
   )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE admin_profiles (
+  user_id BIGINT UNSIGNED NOT NULL,
+  display_name VARCHAR(50) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id),
+  CONSTRAINT fk_admin_profiles_user FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE grades (
   grade_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   selection_id BIGINT UNSIGNED NOT NULL,
   regular_score DECIMAL(5,2) NULL,
   exam_score DECIMAL(5,2) NULL,
-  score DECIMAL(5,2) NULL,
-  grade_status ENUM('pending','submitted') NOT NULL DEFAULT 'pending',
   graded_at DATETIME NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (grade_id),
   UNIQUE KEY uk_grades_selection (selection_id),
-  KEY idx_grades_status (grade_status),
   CONSTRAINT fk_grades_selection FOREIGN KEY (selection_id) REFERENCES course_selection (selection_id) ON DELETE CASCADE,
-  CONSTRAINT chk_grades_score CHECK (score IS NULL OR (score >= 0 AND score <= 100)),
   CONSTRAINT chk_grades_regular_score CHECK (regular_score IS NULL OR (regular_score >= 0 AND regular_score <= 100)),
   CONSTRAINT chk_grades_exam_score CHECK (exam_score IS NULL OR (exam_score >= 0 AND exam_score <= 100))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -183,15 +182,8 @@ CREATE TRIGGER trg_course_selection_after_insert
 AFTER INSERT ON course_selection
 FOR EACH ROW
 BEGIN
-  INSERT INTO grades (selection_id, regular_score, exam_score, score, grade_status, graded_at)
-  VALUES (
-    NEW.selection_id,
-    NEW.score,
-    NEW.score,
-    NEW.score,
-    CASE WHEN NEW.score IS NULL THEN 'pending' ELSE 'submitted' END,
-    CASE WHEN NEW.score IS NULL THEN NULL ELSE NOW() END
-  )
+  INSERT INTO grades (selection_id)
+  VALUES (NEW.selection_id)
   ON DUPLICATE KEY UPDATE
     selection_id = VALUES(selection_id);
 END $$
@@ -411,15 +403,20 @@ VALUES
 -- bcrypt hash generated for plaintext password: 123456
 SET @default_password_hash = '$2b$10$KPmJk68I/oJ01w9MleuPouus0itqy7t3McS3B0/KkH7AOSfObPIUu';
 
-INSERT INTO users (username, password_hash, role, display_name, status)
-VALUES ('admin', @default_password_hash, 'admin', '系统管理员', 'active');
+INSERT INTO users (username, password_hash, role, status)
+VALUES ('admin', @default_password_hash, 'admin', 'active');
 
-INSERT INTO users (username, password_hash, role, display_name, student_id, status)
-SELECT student_id, @default_password_hash, 'student', name, student_id, 'active'
+INSERT INTO admin_profiles (user_id, display_name)
+SELECT user_id, '系统管理员'
+FROM users
+WHERE username = 'admin';
+
+INSERT INTO users (username, password_hash, role, student_id, status)
+SELECT student_id, @default_password_hash, 'student', student_id, 'active'
 FROM student;
 
-INSERT INTO users (username, password_hash, role, display_name, staff_id, status)
-SELECT staff_id, @default_password_hash, 'teacher', name, staff_id, 'active'
+INSERT INTO users (username, password_hash, role, staff_id, status)
+SELECT staff_id, @default_password_hash, 'teacher', staff_id, 'active'
 FROM teacher;
 
 DROP TEMPORARY TABLE IF EXISTS seed_course_selection_scores;
@@ -697,21 +694,9 @@ VALUES
 ON DUPLICATE KEY UPDATE
   score = VALUES(score);
 
-INSERT INTO course_selection (student_id, semester, course_id, staff_id, score, selection_status)
-SELECT student_id, semester, course_id, staff_id, score, 'selected'
+INSERT INTO course_selection (student_id, semester, course_id, staff_id)
+SELECT student_id, semester, course_id, staff_id
 FROM seed_course_selection_scores;
-
-INSERT INTO grades (selection_id, score, grade_status, graded_at)
-SELECT cs.selection_id,
-       cs.score,
-       CASE WHEN cs.score IS NULL THEN 'pending' ELSE 'submitted' END,
-       CASE WHEN cs.score IS NULL THEN NULL ELSE NOW() END
-FROM course_selection AS cs
-WHERE NOT EXISTS (
-  SELECT 1
-  FROM grades AS g
-  WHERE g.selection_id = cs.selection_id
-);
 
 UPDATE grades AS g
 JOIN course_selection AS cs ON cs.selection_id = g.selection_id
@@ -722,10 +707,7 @@ JOIN seed_course_selection_scores AS seed
  AND seed.staff_id = cs.staff_id
 SET g.regular_score = seed.score,
     g.exam_score = seed.score,
-    g.score = seed.score,
-    g.grade_status = IF(seed.score IS NULL, 'pending', 'submitted'),
-    g.graded_at = IF(seed.score IS NULL, NULL, COALESCE(g.graded_at, NOW())),
-    cs.score = seed.score;
+    g.graded_at = IF(seed.score IS NULL, NULL, COALESCE(g.graded_at, NOW()));
 
 -- Clean invalid historical selections introduced by older seed versions.
 -- Keep the graded selection first, then the earlier selected record.
@@ -735,13 +717,15 @@ JOIN (
   SELECT selection_id
   FROM (
     SELECT
-      selection_id,
+      cs.selection_id,
       ROW_NUMBER() OVER (
         PARTITION BY student_id, semester, course_id
-        ORDER BY (score IS NOT NULL) DESC, selected_at ASC, selection_id ASC
+        ORDER BY (g.regular_score IS NOT NULL AND g.exam_score IS NOT NULL) DESC,
+                 cs.selected_at ASC,
+                 cs.selection_id ASC
       ) AS rn
-    FROM course_selection
-    WHERE selection_status = 'selected'
+    FROM course_selection AS cs
+    LEFT JOIN grades AS g ON g.selection_id = cs.selection_id
   ) AS ranked_same_course
   WHERE rn > 1
 ) AS invalid_same_course ON invalid_same_course.selection_id = cs.selection_id;
@@ -755,19 +739,40 @@ JOIN (
       cs.selection_id,
       ROW_NUMBER() OVER (
         PARTITION BY cs.student_id, c.semester, c.class_time
-        ORDER BY (cs.score IS NOT NULL) DESC, cs.selected_at ASC, cs.selection_id ASC
+        ORDER BY (g.regular_score IS NOT NULL AND g.exam_score IS NOT NULL) DESC,
+                 cs.selected_at ASC,
+                 cs.selection_id ASC
       ) AS rn
     FROM course_selection AS cs
+    LEFT JOIN grades AS g ON g.selection_id = cs.selection_id
     JOIN class AS c
       ON c.semester = cs.semester
      AND c.course_id = cs.course_id
      AND c.staff_id = cs.staff_id
-    WHERE cs.selection_status = 'selected'
   ) AS ranked_same_time
   WHERE rn > 1
 ) AS invalid_same_time ON invalid_same_time.selection_id = cs.selection_id;
 
 DROP TEMPORARY TABLE IF EXISTS seed_course_selection_scores;
+
+CREATE OR REPLACE VIEW v_grades AS
+SELECT
+  grade_id,
+  selection_id,
+  regular_score,
+  exam_score,
+  CASE
+    WHEN regular_score IS NULL OR exam_score IS NULL THEN NULL
+    ELSE ROUND(regular_score * 0.4 + exam_score * 0.6, 2)
+  END AS score,
+  CASE
+    WHEN regular_score IS NULL OR exam_score IS NULL THEN 'pending'
+    ELSE 'submitted'
+  END AS grade_status,
+  graded_at,
+  created_at,
+  updated_at
+FROM grades;
 
 DROP PROCEDURE IF EXISTS sp_course_grade_statistics;
 
@@ -797,8 +802,7 @@ BEGIN
     ON cs.semester = c.semester
    AND cs.course_id = c.course_id
    AND cs.staff_id = c.staff_id
-   AND cs.selection_status = 'selected'
-  LEFT JOIN grades AS g ON g.selection_id = cs.selection_id
+  LEFT JOIN v_grades AS g ON g.selection_id = cs.selection_id
   WHERE c.offering_id = p_offering_id
   GROUP BY c.offering_id, c.semester, c.course_id, co.course_name, c.staff_id, t.name;
 END $$
@@ -812,12 +816,13 @@ SELECT
   s.sex,
   s.mobile_phone,
   c.course_name,
-  cs.score
+  g.score
 FROM student AS s
 JOIN course_selection AS cs ON s.student_id = cs.student_id
 JOIN course AS c ON cs.course_id = c.course_id
+JOIN v_grades AS g ON g.selection_id = cs.selection_id
 WHERE s.dept_id = (SELECT dept_id FROM department WHERE dept_name = '计算机学院')
-  AND cs.score < 60;
+  AND g.score < 60;
 
 CREATE OR REPLACE VIEW v_course_offering_detail AS
 SELECT
@@ -847,7 +852,6 @@ LEFT JOIN course_selection AS cs
   ON cs.semester = c.semester
  AND cs.course_id = c.course_id
  AND cs.staff_id = c.staff_id
- AND cs.selection_status = 'selected'
 GROUP BY
   c.offering_id, c.semester, s.semester_name, c.course_id, co.course_name,
   co.credit, co.credit_hours, co.dept_id, d.dept_name, c.staff_id, t.name,
@@ -865,8 +869,7 @@ SELECT
   t.staff_id,
   t.name AS teacher_name,
   c.class_time,
-  c.classroom,
-  cs.selection_status
+  c.classroom
 FROM course_selection AS cs
 JOIN student AS st ON st.student_id = cs.student_id
 JOIN `class` AS c
@@ -896,8 +899,7 @@ LEFT JOIN course_selection AS cs
   ON cs.semester = c.semester
  AND cs.course_id = c.course_id
  AND cs.staff_id = c.staff_id
- AND cs.selection_status = 'selected'
-LEFT JOIN grades AS g ON g.selection_id = cs.selection_id
+LEFT JOIN v_grades AS g ON g.selection_id = cs.selection_id
 GROUP BY c.offering_id, c.semester, c.course_id, co.course_name, c.staff_id, t.name;
 
 CREATE OR REPLACE VIEW v_teacher_course_summary AS
@@ -912,7 +914,6 @@ LEFT JOIN course_selection AS cs
   ON cs.semester = c.semester
  AND cs.course_id = c.course_id
  AND cs.staff_id = c.staff_id
- AND cs.selection_status = 'selected'
 GROUP BY t.staff_id, t.name;
 
 SELECT 'school database rebuilt successfully' AS message;

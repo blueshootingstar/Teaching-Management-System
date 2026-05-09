@@ -32,7 +32,7 @@ mysql -uroot -p < database/00_rebuild_school_from_scratch.sql
 - 插入测试数据。
 - 创建触发器、存储过程和视图。
 
-因此它适合队友本地开发、云服务器部署和演示环境初始化。`database/02_schema.sql`、`database/03_seed.sql` 等脚本保留给“已经存在原始 School 数据库，只做增量升级”的情况。
+因此它适合队友本地开发和演示环境初始化。本项目不再维护增量升级脚本，数据库初始化统一使用该从 0 重建脚本。
 
 ## 3. 核心实体关系
 
@@ -54,6 +54,7 @@ course_selection 1--1 grades
 
 users 0/1--1 student
 users 0/1--1 teacher
+users 0/1--1 admin_profiles
 ```
 
 其中 `class` 表在本系统中表示“开课记录”，不是行政班级。一个开课记录表示某门课程在某个学期由某位教师授课，包含上课时间、教室、容量和开放状态。
@@ -290,10 +291,7 @@ users 0/1--1 teacher
 - `semester`：学期号。
 - `course_id`：课程号。
 - `staff_id`：教师号。
-- `score`：兼容原 School 的总评成绩字段。
-- `selection_status`：选课状态，枚举 `selected` / `dropped`。
 - `selected_at`：选课时间。
-- `dropped_at`：退课时间。
 - `created_at` / `updated_at`：创建和更新时间。
 
 约束与索引：
@@ -303,8 +301,7 @@ users 0/1--1 teacher
 - 外键：
   - `student_id` 引用 `student.student_id`。
   - `semester, course_id, staff_id` 引用 `class` 的复合主键。
-- 检查约束：`score` 为空或位于 0 到 100。
-- 索引：`student_id, selection_status` 和 `semester, course_id, staff_id, selection_status`。
+- 索引：`semester, course_id, staff_id`，便于按开课记录统计已选人数。
 
 系统使用：
 
@@ -318,9 +315,9 @@ users 0/1--1 teacher
 
 - 已录入成绩的课程不能退课。
 - 选课时检查是否重复、是否满员、是否时间冲突、开课状态是否为 `open`。
-- 当前实现退课会删除未出成绩的选课记录；`dropped` 状态字段保留给未来改成保留退课历史的方案。
+- 当前实现退课会删除未出成绩的选课记录；选课表中存在的记录即表示有效选课。
 
-设计说明：`course_selection.score` 与 `grades.score` 有重复，这是有意保留的兼容冗余。原始 School 数据库把成绩放在选课表中，本系统新增独立 `grades` 表后仍保留该字段，以便兼容旧查询、旧视图和实验数据。
+设计说明：为满足第三范式，选课表只保存选课事实，不再保存成绩。成绩由 `grades` 表保存平时成绩和考试成绩，并通过 `v_grades` 视图计算总评成绩和状态。
 
 ### 4.9 `grades` 成绩表
 
@@ -332,8 +329,6 @@ users 0/1--1 teacher
 - `selection_id`：选课 ID，唯一外键。
 - `regular_score`：平时成绩。
 - `exam_score`：考试成绩。
-- `score`：总评成绩。
-- `grade_status`：成绩状态，枚举 `pending` / `submitted`。
 - `graded_at`：成绩录入时间。
 - `created_at` / `updated_at`：创建和更新时间。
 
@@ -342,18 +337,17 @@ users 0/1--1 teacher
 - 主键：`grade_id`。
 - 唯一键：`selection_id`，保证一条选课记录只有一条成绩记录。
 - 外键：`selection_id` 引用 `course_selection.selection_id`，并设置 `ON DELETE CASCADE`。
-- 检查约束：三个成绩字段均为空或位于 0 到 100。
-- 索引：`grade_status`。
+- 检查约束：平时成绩和考试成绩均为空或位于 0 到 100。
 
 系统使用：
 
 - 触发器在选课后自动创建待录入成绩。
 - 教师录入平时成绩和考试成绩。
-- 后端按 `总评成绩 = 平时成绩 * 40% + 考试成绩 * 60%` 计算 `score`。
+- `v_grades` 视图按 `总评成绩 = 平时成绩 * 40% + 考试成绩 * 60%` 计算 `score`，并根据两个分项是否完整计算 `grade_status`。
 - 学生成绩页面展示成绩和绩点。
-- 成绩统计、GPA 走势和课程平均分排名以该表为主要来源。
+- 成绩统计、GPA 走势和课程平均分排名以 `grades` 和 `v_grades` 为主要来源。
 
-设计说明：`score` 理论上可以由平时成绩和考试成绩计算得到，但存储总评成绩可以保证历史结果稳定，并简化统计查询。教师录入成绩时，后端同步更新 `grades.score` 和 `course_selection.score`。
+设计说明：总评成绩和成绩状态不作为基础表字段存储，避免由非主属性决定非主属性造成的更新异常。系统需要展示这些字段时统一读取 `v_grades` 视图。
 
 ### 4.10 `users` 用户表
 
@@ -365,7 +359,6 @@ users 0/1--1 teacher
 - `username`：登录账号，唯一。
 - `password_hash`：bcrypt 密码哈希。
 - `role`：角色，枚举 `admin` / `teacher` / `student`。
-- `display_name`：显示名称。
 - `student_id`：学生账号绑定的学号。
 - `staff_id`：教师账号绑定的教工号。
 - `status`：账号状态，枚举 `active` / `disabled`。
@@ -390,9 +383,10 @@ users 0/1--1 teacher
 - 登录接口按 `username` 查找用户。
 - 使用 bcrypt 校验密码。
 - 登录成功后生成 JWT，JWT 中包含角色和绑定 ID。
+- 学生和教师显示名分别来自 `student.name` 和 `teacher.name`，管理员显示名来自 `admin_profiles`。
 - 前端根据角色进入管理员、教师或学生界面。
 
-设计说明：登录账号与业务实体分离后，学生和教师基础信息可以独立维护，账号禁用、密码修改、角色判断也更清晰。
+设计说明：登录账号与业务实体分离后，学生和教师基础信息可以独立维护。为满足第三范式，`users` 不重复保存学生或教师姓名，避免姓名修改时出现多处不一致。
 
 ## 5. 触发器设计
 
@@ -403,8 +397,8 @@ users 0/1--1 teacher
 作用：
 
 - 自动向 `grades` 表插入一条对应成绩记录。
-- 如果插入的选课记录已有 `score`，则成绩状态为 `submitted`。
-- 如果 `score` 为空，则成绩状态为 `pending`。
+- 新成绩记录只包含 `selection_id`，平时成绩和考试成绩初始为空。
+- 成绩状态由 `v_grades` 视图根据成绩是否完整实时计算。
 
 必要性：
 
@@ -499,8 +493,8 @@ users 0/1--1 teacher
 
 - 更新 `grades.regular_score`。
 - 更新 `grades.exam_score`。
-- 更新 `grades.score`。
-- 更新 `course_selection.score` 以兼容旧结构。
+- 更新 `grades.graded_at`。
+- 总评成绩和提交状态由 `v_grades` 视图计算，不写入基础表。
 
 ### 8.4 GPA 规则
 
@@ -540,14 +534,17 @@ GPA 不直接存入数据库，由前端基于成绩和学分计算。规则为�
 
 前端对不可删除记录禁用删除按钮，并通过悬浮提示显示原因。
 
-## 9. 兼容与冗余说明
+## 9. 第三范式与兼容说明
 
-当前数据库存在一些有意保留的冗余或兼容字段：
+当前最终版基础表按第三范式整理：
 
-- `course_selection.score` 与 `grades.score`：
-  - 原始 School 将成绩放在选课表。
-  - 本系统新增 `grades` 表作为成绩主表。
-  - 为兼容原始查询和视图，保留并同步 `course_selection.score`。
+- `course_selection` 只保存学生、开课记录和选课状态，不保存成绩。
+- `grades` 只保存平时成绩、考试成绩和录入时间，不保存可推导的总评成绩和成绩状态。
+- `v_grades` 视图统一计算 `score` 和 `grade_status`，保证前后端接口仍能直接读取这些展示字段。
+- `users` 只保存认证账号和角色绑定，不重复保存学生或教师姓名。
+- `admin_profiles` 只保存管理员账号特有的显示名。
+
+这些调整消除了成绩和显示名的重复存储，避免同一事实在多个基础表中同步失败。
 
 - `class` 的复合主键与 `offering_id`：
   - 复合主键 `semester, course_id, staff_id` 来自原始 School。
@@ -557,29 +554,26 @@ GPA 不直接存入数据库，由前端基于成绩和学分计算。规则为�
   - 复合主键防止同一学生重复选择同一开课。
   - `selection_id` 方便退课、成绩关联和 API 操作。
 
-- `grades.score` 与 `regular_score` / `exam_score`：
-  - 总评成绩可计算，但保存下来便于统计和保持历史结果稳定。
-
 - 时间戳字段：
-  - `created_at`、`updated_at`、`selected_at`、`dropped_at` 等字段用于审计和未来扩展。
+  - `created_at`、`updated_at`、`selected_at` 等字段用于审计和未来扩展。
   - 当前页面不一定全部展示，但对后续追踪数据变化有意义。
 
-这些设计不是无意义重复，而是在原始数据库兼容、实验要求和系统开发便利之间做出的折中。
+这些设计保留了原始 School 数据库的复合业务键，同时通过视图和代理键兼顾系统开发便利。
 
 ## 10. 测试数据说明
 
 从 0 初始化脚本会插入以下测试数据：
 
-- 院系：3 个。
-- 学生：7 个。
-- 教师：4 个。
-- 课程：6 门。
-- 学期：4 个，当前学期为 `201302`。
-- 教室：21 间，覆盖 A-G 楼。
-- 开课记录：9 条。
-- 选课记录：41 条。
-- 成绩记录：41 条，由触发器随选课记录自动生成。
-- 用户账号：12 个，包括管理员、学生和教师。
+- 院系：5 个。
+- 学生：40 个。
+- 教师：10 个。
+- 课程：18 门。
+- 学期：6 个，当前学期为 `201402`。
+- 教室：35 间，覆盖 A-G 楼。
+- 开课记录：75 条。
+- 选课记录：253 条。
+- 成绩记录：253 条，由触发器随选课记录自动生成。
+- 用户账号：51 个，包括管理员、学生和教师。
 
 默认测试密码均为 `123456`：
 

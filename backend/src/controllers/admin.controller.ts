@@ -81,7 +81,6 @@ async function upsertUser(
   conn: PoolConnection,
   username: string,
   role: 'student' | 'teacher',
-  displayName: string,
   password: string | undefined,
   bindId: string
 ) {
@@ -89,15 +88,14 @@ async function upsertUser(
   const studentId = role === 'student' ? bindId : null;
   const staffId = role === 'teacher' ? bindId : null;
   await conn.execute(
-    `INSERT INTO users (username, password_hash, role, display_name, student_id, staff_id, status)
-     VALUES (?, ?, ?, ?, ?, ?, 'active')
+    `INSERT INTO users (username, password_hash, role, student_id, staff_id, status)
+     VALUES (?, ?, ?, ?, ?, 'active')
      ON DUPLICATE KEY UPDATE
-       display_name = VALUES(display_name),
        student_id = VALUES(student_id),
        staff_id = VALUES(staff_id),
        role = VALUES(role),
        status = 'active'`,
-    [username, passwordHash, role, displayName, studentId, staffId]
+    [username, passwordHash, role, studentId, staffId]
   );
 }
 
@@ -159,7 +157,7 @@ export async function createStudent(req: Request, res: Response) {
         body.status || '正常'
       ]
     );
-    await upsertUser(conn, body.student_id, 'student', body.name, body.password, body.student_id);
+    await upsertUser(conn, body.student_id, 'student', body.password, body.student_id);
     await conn.commit();
     return success(res, null, 'created', 201);
   } catch (error) {
@@ -187,7 +185,6 @@ export async function updateStudent(req: Request, res: Response) {
       req.params.id
     ]
   );
-  await execute('UPDATE users SET display_name = ? WHERE student_id = ?', [body.name, req.params.id]);
   return success(res);
 }
 
@@ -246,7 +243,7 @@ export async function createTeacher(req: Request, res: Response) {
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [body.staff_id, body.name, body.sex, body.date_of_birth, body.professional_ranks, body.salary, body.dept_id]
     );
-    await upsertUser(conn, body.staff_id, 'teacher', body.name, body.password, body.staff_id);
+    await upsertUser(conn, body.staff_id, 'teacher', body.password, body.staff_id);
     await conn.commit();
     return success(res, null, 'created', 201);
   } catch (error) {
@@ -265,7 +262,6 @@ export async function updateTeacher(req: Request, res: Response) {
      WHERE staff_id = ?`,
     [body.name, body.sex, body.date_of_birth, body.professional_ranks, body.salary, body.dept_id, req.params.id]
   );
-  await execute('UPDATE users SET display_name = ? WHERE staff_id = ?', [body.name, req.params.id]);
   return success(res);
 }
 
@@ -448,7 +444,6 @@ export async function listCourseOfferings(_req: Request, res: Response) {
      LEFT JOIN (
        SELECT semester, course_id, staff_id, COUNT(*) AS selected_count
        FROM course_selection
-       WHERE selection_status = 'selected'
        GROUP BY semester, course_id, staff_id
      ) AS selected_counts
        ON selected_counts.semester = c.semester
@@ -570,7 +565,6 @@ async function validateCourseOfferingPayload(body: any, res: Response, offeringI
        FROM class AS c
        LEFT JOIN course_selection AS cs
          ON cs.semester = c.semester AND cs.course_id = c.course_id AND cs.staff_id = c.staff_id
-        AND cs.selection_status = 'selected'
        WHERE c.offering_id = ?`,
       [offeringId]
     );

@@ -25,7 +25,6 @@ export async function myCourses(req: AuthenticatedRequest, res: Response) {
      JOIN course AS co ON co.course_id = c.course_id
      LEFT JOIN course_selection AS cs
        ON cs.semester = c.semester AND cs.course_id = c.course_id AND cs.staff_id = c.staff_id
-      AND cs.selection_status = 'selected'
      WHERE c.staff_id = ?
      GROUP BY c.offering_id, c.semester, co.course_id, co.course_name, co.credit,
               c.class_time, c.classroom, c.capacity, c.status
@@ -46,10 +45,9 @@ export async function courseStudents(req: AuthenticatedRequest, res: Response) {
      JOIN course_selection AS cs
        ON cs.semester = c.semester AND cs.course_id = c.course_id AND cs.staff_id = c.staff_id
      JOIN student AS s ON s.student_id = cs.student_id
-     LEFT JOIN grades AS g ON g.selection_id = cs.selection_id
+     LEFT JOIN v_grades AS g ON g.selection_id = cs.selection_id
      WHERE c.offering_id = ?
        AND c.staff_id = ?
-       AND cs.selection_status = 'selected'
      ORDER BY s.student_id`,
     [req.params.courseOfferingId, staffId]
   );
@@ -64,8 +62,6 @@ export async function updateGrade(req: AuthenticatedRequest, res: Response) {
   if (!isValidScore(regularScore) || !isValidScore(examScore)) {
     return fail(res, '平时成绩和考试成绩都必须在 0 到 100 之间');
   }
-  const score = Number((regularScore * 0.4 + examScore * 0.6).toFixed(2));
-
   const rows = await query<RowDataPacket[]>(
     `SELECT g.grade_id, cs.selection_id
      FROM grades AS g
@@ -83,11 +79,10 @@ export async function updateGrade(req: AuthenticatedRequest, res: Response) {
 
   await execute(
     `UPDATE grades
-     SET regular_score = ?, exam_score = ?, score = ?, grade_status = 'submitted', graded_at = NOW()
+     SET regular_score = ?, exam_score = ?, graded_at = NOW()
      WHERE grade_id = ?`,
-    [regularScore, examScore, score, req.params.gradeId]
+    [regularScore, examScore, req.params.gradeId]
   );
-  await execute('UPDATE course_selection SET score = ? WHERE selection_id = ?', [score, grade.selection_id]);
 
   return success(res);
 }

@@ -35,9 +35,20 @@ export async function login(req: Request, res: Response) {
   }
 
   const users = await query<UserRow[]>(
-    `SELECT user_id, username, password_hash, role, display_name, student_id, staff_id, status
-     FROM users
-     WHERE username = ?
+    `SELECT
+       u.user_id,
+       u.username,
+       u.password_hash,
+       u.role,
+       COALESCE(ap.display_name, s.name, t.name, u.username) AS display_name,
+       u.student_id,
+       u.staff_id,
+       u.status
+     FROM users AS u
+     LEFT JOIN admin_profiles AS ap ON ap.user_id = u.user_id
+     LEFT JOIN student AS s ON s.student_id = u.student_id
+     LEFT JOIN teacher AS t ON t.staff_id = u.staff_id
+     WHERE u.username = ?
      LIMIT 1`,
     [username]
   );

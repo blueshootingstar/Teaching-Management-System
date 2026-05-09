@@ -16,7 +16,7 @@
 teaching-management-system/
 ├─ backend/                 # Express + TypeScript 后端
 ├─ frontend/                # React + Vite 前端
-├─ database/                # 数据库初始化和增量脚本
+├─ database/                # 数据库从 0 初始化脚本
 ├─ docs/                    # 数据库设计、API、部署等文档
 └─ README.md
 ```
@@ -71,14 +71,6 @@ mysql -uroot -p < database/00_rebuild_school_from_scratch.sql
 执行后输入你本机 MySQL 的 `root` 密码。该脚本会删除并重新创建 `school` 数据库，包含完整表结构、演示数据、触发器、存储过程和视图。
 
 注意：`00_rebuild_school_from_scratch.sql` 会重建数据库。如果你已经在本机数据库里手动改过数据，执行前请先备份。
-
-如果只是想给已有的 `school` 数据库补充演示数据，可以执行：
-
-```bash
-mysql -uroot -p school < database/03_seed.sql
-```
-
-`database/07_report_queries.sql` 是实验报告展示用查询，不是启动系统必须执行的脚本。
 
 ## 配置并启动后端
 
@@ -312,6 +304,7 @@ teaching-management-system/frontend
 - `course_selection`：选课记录
 - `grades`：成绩
 - `users`：登录用户
+- `admin_profiles`：管理员资料
 
 其中 `class` 在本系统里表示“开课记录”，不是行政班级。
 
