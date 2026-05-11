@@ -10,6 +10,8 @@ router.use(authMiddleware, requireRole('admin'));
 
 router.get('/departments', asyncHandler(admin.listDepartments));
 router.get('/classrooms', asyncHandler(admin.listClassrooms));
+router.get('/course-selection-window', asyncHandler(admin.getCourseSelectionWindow));
+router.put('/course-selection-window', asyncHandler(admin.updateCourseSelectionWindow));
 
 router.get('/students', asyncHandler(admin.listStudents));
 router.post('/students', asyncHandler(admin.createStudent));

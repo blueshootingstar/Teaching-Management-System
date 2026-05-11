@@ -19,7 +19,7 @@ export async function studentStatistics(req: Request, res: Response) {
      FROM student AS s
      LEFT JOIN course_selection AS cs ON cs.student_id = s.student_id
      LEFT JOIN v_grades AS g ON g.selection_id = cs.selection_id AND g.score IS NOT NULL
-     LEFT JOIN class AS c ON c.semester = cs.semester AND c.course_id = cs.course_id AND c.staff_id = cs.staff_id
+     LEFT JOIN course_offerings AS c ON c.offering_id = cs.offering_id
      LEFT JOIN course AS co ON co.course_id = c.course_id
      WHERE s.student_id = ?
      GROUP BY s.student_id, s.name`,
@@ -36,9 +36,8 @@ export async function teacherStatistics(req: Request, res: Response) {
        COUNT(DISTINCT c.offering_id) AS offering_count,
        COUNT(cs.selection_id) AS student_count
      FROM teacher AS t
-     LEFT JOIN class AS c ON c.staff_id = t.staff_id
-     LEFT JOIN course_selection AS cs
-       ON cs.semester = c.semester AND cs.course_id = c.course_id AND cs.staff_id = c.staff_id
+     LEFT JOIN course_offerings AS c ON c.staff_id = t.staff_id
+     LEFT JOIN course_selection AS cs ON cs.offering_id = c.offering_id
      WHERE t.staff_id = ?
      GROUP BY t.staff_id, t.name`,
     [req.params.teacherId]
@@ -50,18 +49,17 @@ export async function semesterStatistics(req: Request, res: Response) {
   const rows = await query<RowDataPacket[]>(
     `SELECT
        c.offering_id,
-       c.semester,
+       c.semester_id AS semester,
        co.course_id,
        co.course_name,
        t.name AS teacher_name,
        COUNT(cs.selection_id) AS selected_count
-     FROM class AS c
+     FROM course_offerings AS c
      JOIN course AS co ON co.course_id = c.course_id
      JOIN teacher AS t ON t.staff_id = c.staff_id
-     LEFT JOIN course_selection AS cs
-       ON cs.semester = c.semester AND cs.course_id = c.course_id AND cs.staff_id = c.staff_id
-     WHERE c.semester = ?
-     GROUP BY c.offering_id, c.semester, co.course_id, co.course_name, t.name
+     LEFT JOIN course_selection AS cs ON cs.offering_id = c.offering_id
+     WHERE c.semester_id = ?
+     GROUP BY c.offering_id, c.semester_id, co.course_id, co.course_name, t.name
      ORDER BY selected_count DESC, co.course_id`,
     [req.params.semesterId]
   );
@@ -75,9 +73,8 @@ export async function courseRanking(_req: Request, res: Response) {
        co.course_name,
        ROUND(AVG(g.score), 2) AS average_score
      FROM course AS co
-     JOIN class AS c ON c.course_id = co.course_id
-     JOIN course_selection AS cs
-       ON cs.semester = c.semester AND cs.course_id = c.course_id AND cs.staff_id = c.staff_id
+     JOIN course_offerings AS c ON c.course_id = co.course_id
+     JOIN course_selection AS cs ON cs.offering_id = c.offering_id
      JOIN v_grades AS g ON g.selection_id = cs.selection_id
      WHERE g.score IS NOT NULL
      GROUP BY co.course_id, co.course_name

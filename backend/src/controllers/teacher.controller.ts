@@ -18,17 +18,16 @@ export async function myCourses(req: AuthenticatedRequest, res: Response) {
   if (!staffId) return null;
   const rows = await query<RowDataPacket[]>(
     `SELECT
-       c.offering_id, c.semester, co.course_id, co.course_name, co.credit,
-       c.class_time, c.classroom, c.capacity, c.status,
+       c.offering_id, c.semester_id AS semester, co.course_id, co.course_name, co.credit,
+       c.class_time, CONCAT(c.classroom_building_no, c.classroom_room_no) AS classroom, c.capacity, c.status,
        COUNT(cs.selection_id) AS selected_count
-     FROM class AS c
+     FROM course_offerings AS c
      JOIN course AS co ON co.course_id = c.course_id
-     LEFT JOIN course_selection AS cs
-       ON cs.semester = c.semester AND cs.course_id = c.course_id AND cs.staff_id = c.staff_id
+     LEFT JOIN course_selection AS cs ON cs.offering_id = c.offering_id
      WHERE c.staff_id = ?
-     GROUP BY c.offering_id, c.semester, co.course_id, co.course_name, co.credit,
-              c.class_time, c.classroom, c.capacity, c.status
-     ORDER BY c.semester DESC, co.course_id`,
+     GROUP BY c.offering_id, c.semester_id, co.course_id, co.course_name, co.credit,
+              c.class_time, c.classroom_building_no, c.classroom_room_no, c.capacity, c.status
+     ORDER BY c.semester_id DESC, co.course_id`,
     [staffId]
   );
   return success(res, rows);
@@ -38,12 +37,11 @@ export async function courseStudents(req: AuthenticatedRequest, res: Response) {
   const staffId = requireStaffId(req, res);
   if (!staffId) return null;
   const rows = await query<RowDataPacket[]>(
-    `SELECT
+     `SELECT
        cs.selection_id, g.grade_id, s.student_id, s.name AS student_name,
        s.mobile_phone, g.regular_score, g.exam_score, g.score, g.grade_status
-     FROM class AS c
-     JOIN course_selection AS cs
-       ON cs.semester = c.semester AND cs.course_id = c.course_id AND cs.staff_id = c.staff_id
+     FROM course_offerings AS c
+     JOIN course_selection AS cs ON cs.offering_id = c.offering_id
      JOIN student AS s ON s.student_id = cs.student_id
      LEFT JOIN v_grades AS g ON g.selection_id = cs.selection_id
      WHERE c.offering_id = ?
@@ -66,7 +64,7 @@ export async function updateGrade(req: AuthenticatedRequest, res: Response) {
     `SELECT g.grade_id, cs.selection_id
      FROM grades AS g
      JOIN course_selection AS cs ON cs.selection_id = g.selection_id
-     JOIN class AS c ON c.semester = cs.semester AND c.course_id = cs.course_id AND c.staff_id = cs.staff_id
+     JOIN course_offerings AS c ON c.offering_id = cs.offering_id
      WHERE g.grade_id = ? AND c.staff_id = ?
      LIMIT 1`,
     [req.params.gradeId, staffId]
@@ -79,7 +77,7 @@ export async function updateGrade(req: AuthenticatedRequest, res: Response) {
 
   await execute(
     `UPDATE grades
-     SET regular_score = ?, exam_score = ?, graded_at = NOW()
+     SET regular_score = ?, exam_score = ?
      WHERE grade_id = ?`,
     [regularScore, examScore, req.params.gradeId]
   );
@@ -92,7 +90,7 @@ export async function courseStatistics(req: AuthenticatedRequest, res: Response)
   if (!staffId) return null;
 
   const ownerRows = await query<RowDataPacket[]>(
-    'SELECT offering_id FROM class WHERE offering_id = ? AND staff_id = ? LIMIT 1',
+    'SELECT offering_id FROM course_offerings WHERE offering_id = ? AND staff_id = ? LIMIT 1',
     [req.params.courseOfferingId, staffId]
   );
   if (ownerRows.length === 0) {

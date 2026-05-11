@@ -15,8 +15,6 @@ SET FOREIGN_KEY_CHECKS = 1;
 CREATE TABLE department (
   dept_id CHAR(2) NOT NULL,
   dept_name VARCHAR(50) NOT NULL,
-  address VARCHAR(100) NOT NULL,
-  phone_code VARCHAR(20) NOT NULL,
   PRIMARY KEY (dept_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -26,22 +24,21 @@ CREATE TABLE semesters (
   start_date DATE NULL,
   end_date DATE NULL,
   is_current TINYINT(1) NOT NULL DEFAULT 0,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (semester_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE system_settings (
+  setting_key VARCHAR(64) NOT NULL,
+  setting_value VARCHAR(255) NOT NULL,
+  PRIMARY KEY (setting_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE classrooms (
-  classroom_id VARCHAR(10) NOT NULL,
-  building CHAR(1) NOT NULL,
-  floor_no INT NOT NULL,
+  building_no CHAR(1) NOT NULL,
   room_no VARCHAR(10) NOT NULL,
   capacity INT NOT NULL DEFAULT 60,
   status ENUM('available','disabled') NOT NULL DEFAULT 'available',
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (classroom_id),
-  KEY idx_classrooms_building_floor (building, floor_no),
+  PRIMARY KEY (building_no, room_no),
   CONSTRAINT chk_classrooms_capacity CHECK (capacity > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -84,79 +81,72 @@ CREATE TABLE course (
   CONSTRAINT fk_course_department FOREIGN KEY (dept_id) REFERENCES department (dept_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE `class` (
+CREATE TABLE course_offerings (
   offering_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  semester CHAR(6) NOT NULL,
+  semester_id CHAR(6) NOT NULL,
   course_id CHAR(8) NOT NULL,
   staff_id CHAR(4) NOT NULL,
   class_time VARCHAR(50) NOT NULL,
   capacity INT NOT NULL DEFAULT 60,
   status ENUM('open','closed') NOT NULL DEFAULT 'open',
-  classroom VARCHAR(10) NOT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (semester, course_id, staff_id),
-  UNIQUE KEY uk_class_offering_id (offering_id),
-  KEY idx_class_course (course_id),
-  KEY idx_class_teacher (staff_id),
-  KEY idx_class_semester_status (semester, status),
-  KEY idx_class_classroom (classroom),
-  CONSTRAINT fk_class_semester FOREIGN KEY (semester) REFERENCES semesters (semester_id),
-  CONSTRAINT fk_class_course FOREIGN KEY (course_id) REFERENCES course (course_id),
-  CONSTRAINT fk_class_teacher FOREIGN KEY (staff_id) REFERENCES teacher (staff_id),
-  CONSTRAINT fk_class_classroom FOREIGN KEY (classroom) REFERENCES classrooms (classroom_id),
-  CONSTRAINT chk_class_capacity CHECK (capacity > 0)
+  classroom_building_no CHAR(1) NOT NULL,
+  classroom_room_no VARCHAR(10) NOT NULL,
+  PRIMARY KEY (offering_id),
+  UNIQUE KEY uk_course_offerings_business (semester_id, course_id, staff_id),
+  KEY idx_course_offerings_course (course_id),
+  KEY idx_course_offerings_teacher (staff_id),
+  KEY idx_course_offerings_semester_status (semester_id, status),
+  KEY idx_course_offerings_classroom (classroom_building_no, classroom_room_no),
+  CONSTRAINT fk_course_offerings_semester FOREIGN KEY (semester_id) REFERENCES semesters (semester_id),
+  CONSTRAINT fk_course_offerings_course FOREIGN KEY (course_id) REFERENCES course (course_id),
+  CONSTRAINT fk_course_offerings_teacher FOREIGN KEY (staff_id) REFERENCES teacher (staff_id),
+  CONSTRAINT fk_course_offerings_classroom FOREIGN KEY (classroom_building_no, classroom_room_no) REFERENCES classrooms (building_no, room_no),
+  CONSTRAINT chk_course_offerings_capacity CHECK (capacity > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE course_selection (
   selection_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   student_id CHAR(4) NOT NULL,
-  semester CHAR(6) NOT NULL,
-  course_id CHAR(8) NOT NULL,
-  staff_id CHAR(4) NOT NULL,
-  selected_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (student_id, semester, course_id, staff_id),
-  UNIQUE KEY uk_course_selection_id (selection_id),
-  KEY idx_selection_offering_lookup (semester, course_id, staff_id),
+  offering_id BIGINT UNSIGNED NOT NULL,
+  PRIMARY KEY (selection_id),
+  UNIQUE KEY uk_course_selection_student_offering (student_id, offering_id),
+  KEY idx_selection_offering_lookup (offering_id),
   CONSTRAINT fk_selection_student FOREIGN KEY (student_id) REFERENCES student (student_id),
-  CONSTRAINT fk_selection_class FOREIGN KEY (semester, course_id, staff_id)
-    REFERENCES `class` (semester, course_id, staff_id)
+  CONSTRAINT fk_selection_offering FOREIGN KEY (offering_id) REFERENCES course_offerings (offering_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE users (
   user_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  username VARCHAR(50) NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
-  role ENUM('admin','teacher','student') NOT NULL,
-  student_id CHAR(4) NULL,
-  staff_id CHAR(4) NULL,
   status ENUM('active','disabled') NOT NULL DEFAULT 'active',
-  last_login_at DATETIME NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (user_id),
-  UNIQUE KEY uk_users_username (username),
-  KEY idx_users_role (role),
-  UNIQUE KEY uk_users_student (student_id),
-  UNIQUE KEY uk_users_teacher (staff_id),
-  CONSTRAINT fk_users_student FOREIGN KEY (student_id) REFERENCES student (student_id),
-  CONSTRAINT fk_users_teacher FOREIGN KEY (staff_id) REFERENCES teacher (staff_id),
-  CONSTRAINT chk_users_role_binding CHECK (
-    (role = 'admin' AND student_id IS NULL AND staff_id IS NULL)
-    OR (role = 'student' AND student_id IS NOT NULL AND staff_id IS NULL)
-    OR (role = 'teacher' AND staff_id IS NOT NULL AND student_id IS NULL)
-  )
+  PRIMARY KEY (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-CREATE TABLE admin_profiles (
+CREATE TABLE admin_accounts (
   user_id BIGINT UNSIGNED NOT NULL,
+  username VARCHAR(50) NOT NULL,
   display_name VARCHAR(50) NOT NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (user_id),
-  CONSTRAINT fk_admin_profiles_user FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
+  UNIQUE KEY uk_admin_accounts_username (username),
+  CONSTRAINT fk_admin_accounts_user FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE student_accounts (
+  user_id BIGINT UNSIGNED NOT NULL,
+  student_id CHAR(4) NOT NULL,
+  PRIMARY KEY (user_id),
+  UNIQUE KEY uk_student_accounts_student (student_id),
+  CONSTRAINT fk_student_accounts_user FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE,
+  CONSTRAINT fk_student_accounts_student FOREIGN KEY (student_id) REFERENCES student (student_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE teacher_accounts (
+  user_id BIGINT UNSIGNED NOT NULL,
+  staff_id CHAR(4) NOT NULL,
+  PRIMARY KEY (user_id),
+  UNIQUE KEY uk_teacher_accounts_teacher (staff_id),
+  CONSTRAINT fk_teacher_accounts_user FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE,
+  CONSTRAINT fk_teacher_accounts_teacher FOREIGN KEY (staff_id) REFERENCES teacher (staff_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE grades (
@@ -164,9 +154,6 @@ CREATE TABLE grades (
   selection_id BIGINT UNSIGNED NOT NULL,
   regular_score DECIMAL(5,2) NULL,
   exam_score DECIMAL(5,2) NULL,
-  graded_at DATETIME NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (grade_id),
   UNIQUE KEY uk_grades_selection (selection_id),
   CONSTRAINT fk_grades_selection FOREIGN KEY (selection_id) REFERENCES course_selection (selection_id) ON DELETE CASCADE,
@@ -190,13 +177,13 @@ END $$
 
 DELIMITER ;
 
-INSERT INTO department (dept_id, dept_name, address, phone_code)
+INSERT INTO department (dept_id, dept_name)
 VALUES
-  ('01', '计算机学院', '上大东校区三号楼', '65347567'),
-  ('02', '通讯学院', '上大东校区二号楼', '65341234'),
-  ('03', '材料学院', '上大东校区四号楼', '65347890'),
-  ('04', '经济管理学院', '上大东校区五号楼', '65345678'),
-  ('05', '外国语学院', '上大东校区六号楼', '65349876');
+  ('01', '计算机学院'),
+  ('02', '通讯学院'),
+  ('03', '材料学院'),
+  ('04', '经济管理学院'),
+  ('05', '外国语学院');
 
 INSERT INTO semesters (semester_id, semester_name, start_date, end_date, is_current)
 VALUES
@@ -207,43 +194,46 @@ VALUES
   ('201401', '2014学年第一学期', '2014-09-01', '2015-01-20', 0),
   ('201402', '2014学年第二学期', '2015-03-01', '2015-07-10', 1);
 
-INSERT INTO classrooms (classroom_id, building, floor_no, room_no, capacity, status)
+INSERT INTO system_settings (setting_key, setting_value)
+VALUES ('course_selection_open', '1');
+
+INSERT INTO classrooms (building_no, room_no, capacity, status)
 VALUES
-  ('A101', 'A', 1, '101', 60, 'available'),
-  ('A102', 'A', 1, '102', 60, 'available'),
-  ('A203', 'A', 2, '203', 80, 'available'),
-  ('A304', 'A', 3, '304', 90, 'available'),
-  ('A405', 'A', 4, '405', 100, 'available'),
-  ('B101', 'B', 1, '101', 60, 'available'),
-  ('B102', 'B', 1, '102', 60, 'available'),
-  ('B202', 'B', 2, '202', 80, 'available'),
-  ('B305', 'B', 3, '305', 90, 'available'),
-  ('B405', 'B', 4, '405', 100, 'available'),
-  ('C101', 'C', 1, '101', 60, 'available'),
-  ('C102', 'C', 1, '102', 60, 'available'),
-  ('C204', 'C', 2, '204', 80, 'available'),
-  ('C306', 'C', 3, '306', 90, 'available'),
-  ('C405', 'C', 4, '405', 100, 'available'),
-  ('D101', 'D', 1, '101', 60, 'available'),
-  ('D102', 'D', 1, '102', 60, 'available'),
-  ('D203', 'D', 2, '203', 80, 'available'),
-  ('D304', 'D', 3, '304', 90, 'available'),
-  ('D405', 'D', 4, '405', 100, 'available'),
-  ('E101', 'E', 1, '101', 60, 'available'),
-  ('E202', 'E', 2, '202', 80, 'available'),
-  ('E203', 'E', 2, '203', 80, 'available'),
-  ('E303', 'E', 3, '303', 90, 'available'),
-  ('E405', 'E', 4, '405', 100, 'available'),
-  ('F101', 'F', 1, '101', 60, 'available'),
-  ('F102', 'F', 1, '102', 60, 'available'),
-  ('F204', 'F', 2, '204', 80, 'available'),
-  ('F306', 'F', 3, '306', 90, 'available'),
-  ('F405', 'F', 4, '405', 100, 'available'),
-  ('G101', 'G', 1, '101', 60, 'available'),
-  ('G102', 'G', 1, '102', 60, 'available'),
-  ('G203', 'G', 2, '203', 80, 'available'),
-  ('G305', 'G', 3, '305', 90, 'available'),
-  ('G405', 'G', 4, '405', 100, 'available');
+  ('A', '101', 60, 'available'),
+  ('A', '102', 60, 'available'),
+  ('A', '203', 80, 'available'),
+  ('A', '304', 90, 'available'),
+  ('A', '405', 100, 'available'),
+  ('B', '101', 60, 'available'),
+  ('B', '102', 60, 'available'),
+  ('B', '202', 80, 'available'),
+  ('B', '305', 90, 'available'),
+  ('B', '405', 100, 'available'),
+  ('C', '101', 60, 'available'),
+  ('C', '102', 60, 'available'),
+  ('C', '204', 80, 'available'),
+  ('C', '306', 90, 'available'),
+  ('C', '405', 100, 'available'),
+  ('D', '101', 60, 'available'),
+  ('D', '102', 60, 'available'),
+  ('D', '203', 80, 'available'),
+  ('D', '304', 90, 'available'),
+  ('D', '405', 100, 'available'),
+  ('E', '101', 60, 'available'),
+  ('E', '202', 80, 'available'),
+  ('E', '203', 80, 'available'),
+  ('E', '303', 90, 'available'),
+  ('E', '405', 100, 'available'),
+  ('F', '101', 60, 'available'),
+  ('F', '102', 60, 'available'),
+  ('F', '204', 80, 'available'),
+  ('F', '306', 90, 'available'),
+  ('F', '405', 100, 'available'),
+  ('G', '101', 60, 'available'),
+  ('G', '102', 60, 'available'),
+  ('G', '203', 80, 'available'),
+  ('G', '305', 90, 'available'),
+  ('G', '405', 100, 'available');
 
 INSERT INTO student (student_id, name, sex, date_of_birth, native_place, mobile_phone, dept_id, status)
 VALUES
@@ -322,102 +312,122 @@ VALUES
   ('08306002', '会计学基础', 3, 36, '04'),
   ('08307001', '大学英语', 2, 32, '05');
 
-INSERT INTO `class` (semester, course_id, staff_id, class_time, capacity, status, classroom)
+INSERT INTO course_offerings (semester_id, course_id, staff_id, class_time, capacity, status, classroom_building_no, classroom_room_no)
 VALUES
-  ('201201', '08305001', '0103', '星期三5-6', 50, 'open', 'A101'),
-  ('201201', '08305002', '0101', '星期二3-4', 50, 'open', 'A102'),
-  ('201201', '08302001', '0201', '星期三1-2', 45, 'open', 'B101'),
-  ('201201', '08301001', '0301', '星期四1-2', 50, 'open', 'C101'),
-  ('201201', '08307001', '0501', '星期五3-4', 50, 'open', 'D101'),
-  ('201201', '08306001', '0401', '星期三9-10', 50, 'open', 'E101'),
-  ('201202', '08305002', '0101', '星期三1-2', 60, 'open', 'A203'),
-  ('201202', '08305002', '0102', '星期三3-4', 55, 'open', 'B101'),
-  ('201202', '08305002', '0103', '星期三5-6', 55, 'open', 'B202'),
-  ('201202', '08305003', '0102', '星期五5-6', 55, 'open', 'C101'),
-  ('201202', '08305005', '0104', '星期一3-4', 70, 'open', 'B305'),
-  ('201202', '08302002', '0202', '星期二5-6', 70, 'open', 'D203'),
-  ('201202', '08301002', '0301', '星期四5-6', 70, 'open', 'E202'),
-  ('201301', '08305001', '0102', '星期一5-6', 70, 'closed', 'C204'),
-  ('201301', '08305004', '0101', '星期二1-2', 50, 'open', 'D101'),
-  ('201301', '08305006', '0105', '星期二3-4', 70, 'open', 'D203'),
-  ('201301', '08305007', '0104', '星期三5-6', 80, 'open', 'E303'),
-  ('201301', '08302003', '0202', '星期四1-2', 70, 'open', 'F204'),
-  ('201301', '08301003', '0301', '星期五5-6', 70, 'open', 'G203'),
-  ('201301', '08306002', '0401', '星期三9-10', 80, 'open', 'A304'),
-  ('201302', '08301001', '0201', '星期四1-2', 70, 'closed', 'F204'),
-  ('201302', '08302001', '0201', '星期一5-6', 70, 'open', 'A203'),
-  ('201302', '08305002', '0101', '星期二1-2', 50, 'open', 'B101'),
-  ('201302', '08305003', '0102', '星期二3-4', 60, 'open', 'B202'),
-  ('201302', '08305005', '0104', '星期三1-2', 80, 'open', 'C306'),
-  ('201302', '08305008', '0105', '星期三3-4', 90, 'open', 'D405'),
-  ('201302', '08306001', '0401', '星期四5-6', 50, 'open', 'E101'),
-  ('201302', '08307001', '0501', '星期五7-8', 50, 'open', 'G101'),
-  ('201401', '08305001', '0103', '星期一1-2', 50, 'open', 'A101'),
-  ('201401', '08305004', '0101', '星期一3-4', 50, 'open', 'A102'),
-  ('201401', '08305006', '0105', '星期二1-2', 70, 'open', 'A203'),
-  ('201401', '08305007', '0104', '星期二3-4', 80, 'open', 'B305'),
-  ('201401', '08305009', '0105', '星期三5-6', 80, 'open', 'C306'),
-  ('201401', '08302002', '0202', '星期四1-2', 70, 'open', 'D203'),
-  ('201401', '08301002', '0301', '星期五1-2', 70, 'open', 'E202'),
-  ('201401', '08306002', '0401', '星期五3-4', 80, 'closed', 'F306'),
-  ('201402', '08305002', '0101', '星期一1-2', 50, 'open', 'A101'),
-  ('201402', '08305003', '0102', '星期一3-4', 70, 'open', 'A203'),
-  ('201402', '08305005', '0104', '星期二1-2', 60, 'open', 'B202'),
-  ('201402', '08305006', '0105', '星期二3-4', 80, 'open', 'B305'),
-  ('201402', '08305008', '0105', '星期三1-2', 70, 'open', 'C204'),
-  ('201402', '08305009', '0104', '星期三3-4', 80, 'open', 'C306'),
-  ('201402', '08302003', '0202', '星期四1-2', 70, 'open', 'D203'),
-  ('201402', '08301003', '0301', '星期四3-4', 80, 'open', 'E303'),
-  ('201402', '08307001', '0501', '星期五1-2', 50, 'open', 'F101'),
-  ('201402', '08305001', '0103', '星期一1-2', 50, 'open', 'A102'),
-  ('201402', '08305004', '0104', '星期一1-2', 60, 'open', 'A203'),
-  ('201402', '08302001', '0201', '星期一1-2', 50, 'open', 'B101'),
-  ('201402', '08306001', '0401', '星期一1-2', 60, 'open', 'E101'),
-  ('201402', '08305002', '0102', '星期一3-4', 55, 'open', 'B102'),
-  ('201402', '08305005', '0105', '星期一3-4', 60, 'open', 'B202'),
-  ('201402', '08302002', '0202', '星期一3-4', 70, 'open', 'D203'),
-  ('201402', '08301001', '0301', '星期一3-4', 60, 'open', 'C101'),
-  ('201402', '08305003', '0101', '星期二1-2', 60, 'open', 'C102'),
-  ('201402', '08305006', '0101', '星期二1-2', 60, 'open', 'C204'),
-  ('201402', '08305007', '0105', '星期二1-2', 70, 'open', 'D304'),
-  ('201402', '08301002', '0301', '星期二1-2', 70, 'open', 'E202'),
-  ('201402', '08305004', '0101', '星期二3-4', 50, 'open', 'D101'),
-  ('201402', '08305008', '0103', '星期二3-4', 70, 'open', 'E203'),
-  ('201402', '08302003', '0201', '星期二3-4', 70, 'open', 'F204'),
-  ('201402', '08306002', '0401', '星期二3-4', 70, 'open', 'F306'),
-  ('201402', '08305001', '0102', '星期三1-2', 60, 'open', 'G101'),
-  ('201402', '08305007', '0101', '星期三1-2', 60, 'open', 'G102'),
-  ('201402', '08302001', '0202', '星期三1-2', 70, 'open', 'G203'),
-  ('201402', '08301002', '0102', '星期三1-2', 70, 'open', 'A304'),
-  ('201402', '08305002', '0103', '星期三3-4', 55, 'open', 'B405'),
-  ('201402', '08305005', '0101', '星期三3-4', 60, 'open', 'C405'),
-  ('201402', '08302002', '0201', '星期三3-4', 70, 'open', 'D405'),
-  ('201402', '08301001', '0102', '星期三3-4', 70, 'open', 'E405'),
-  ('201402', '08305006', '0103', '星期四1-2', 70, 'open', 'F405'),
-  ('201402', '08306001', '0101', '星期四1-2', 60, 'open', 'A405'),
-  ('201402', '08305008', '0102', '星期四3-4', 60, 'open', 'C102'),
-  ('201402', '08302003', '0101', '星期四3-4', 60, 'open', 'D102'),
-  ('201402', '08305009', '0105', '星期五1-2', 80, 'open', 'E203'),
-  ('201402', '08306002', '0501', '星期五1-2', 70, 'open', 'G305');
+  ('201201', '08305001', '0103', '星期三5-6', 50, 'open', 'A', '101'),
+  ('201201', '08305002', '0101', '星期二3-4', 50, 'open', 'A', '102'),
+  ('201201', '08302001', '0201', '星期三1-2', 45, 'open', 'B', '101'),
+  ('201201', '08301001', '0301', '星期四1-2', 50, 'open', 'C', '101'),
+  ('201201', '08307001', '0501', '星期五3-4', 50, 'open', 'D', '101'),
+  ('201201', '08306001', '0401', '星期三9-10', 50, 'open', 'E', '101'),
+  ('201202', '08305002', '0101', '星期三1-2', 60, 'open', 'A', '203'),
+  ('201202', '08305002', '0102', '星期三3-4', 55, 'open', 'B', '101'),
+  ('201202', '08305002', '0103', '星期三5-6', 55, 'open', 'B', '202'),
+  ('201202', '08305003', '0102', '星期五5-6', 55, 'open', 'C', '101'),
+  ('201202', '08305005', '0104', '星期一3-4', 70, 'open', 'B', '305'),
+  ('201202', '08302002', '0202', '星期二5-6', 70, 'open', 'D', '203'),
+  ('201202', '08301002', '0301', '星期四5-6', 70, 'open', 'E', '202'),
+  ('201301', '08305001', '0102', '星期一5-6', 70, 'closed', 'C', '204'),
+  ('201301', '08305004', '0101', '星期二1-2', 50, 'open', 'D', '101'),
+  ('201301', '08305006', '0105', '星期二3-4', 70, 'open', 'D', '203'),
+  ('201301', '08305007', '0104', '星期三5-6', 80, 'open', 'E', '303'),
+  ('201301', '08302003', '0202', '星期四1-2', 70, 'open', 'F', '204'),
+  ('201301', '08301003', '0301', '星期五5-6', 70, 'open', 'G', '203'),
+  ('201301', '08306002', '0401', '星期三9-10', 80, 'open', 'A', '304'),
+  ('201302', '08301001', '0201', '星期四1-2', 70, 'closed', 'F', '204'),
+  ('201302', '08302001', '0201', '星期一5-6', 70, 'open', 'A', '203'),
+  ('201302', '08305002', '0101', '星期二1-2', 50, 'open', 'B', '101'),
+  ('201302', '08305003', '0102', '星期二3-4', 60, 'open', 'B', '202'),
+  ('201302', '08305005', '0104', '星期三1-2', 80, 'open', 'C', '306'),
+  ('201302', '08305008', '0105', '星期三3-4', 90, 'open', 'D', '405'),
+  ('201302', '08306001', '0401', '星期四5-6', 50, 'open', 'E', '101'),
+  ('201302', '08307001', '0501', '星期五7-8', 50, 'open', 'G', '101'),
+  ('201401', '08305001', '0103', '星期一1-2', 50, 'open', 'A', '101'),
+  ('201401', '08305004', '0101', '星期一3-4', 50, 'open', 'A', '102'),
+  ('201401', '08305006', '0105', '星期二1-2', 70, 'open', 'A', '203'),
+  ('201401', '08305007', '0104', '星期二3-4', 80, 'open', 'B', '305'),
+  ('201401', '08305009', '0105', '星期三5-6', 80, 'open', 'C', '306'),
+  ('201401', '08302002', '0202', '星期四1-2', 70, 'open', 'D', '203'),
+  ('201401', '08301002', '0301', '星期五1-2', 70, 'open', 'E', '202'),
+  ('201401', '08306002', '0401', '星期五3-4', 80, 'closed', 'F', '306'),
+  ('201402', '08305002', '0101', '星期一1-2', 50, 'open', 'A', '101'),
+  ('201402', '08305003', '0102', '星期一3-4', 70, 'open', 'A', '203'),
+  ('201402', '08305005', '0104', '星期二1-2', 60, 'open', 'B', '202'),
+  ('201402', '08305006', '0105', '星期二3-4', 80, 'open', 'B', '305'),
+  ('201402', '08305008', '0105', '星期三1-2', 70, 'open', 'C', '204'),
+  ('201402', '08305009', '0104', '星期三3-4', 80, 'open', 'C', '306'),
+  ('201402', '08302003', '0202', '星期四1-2', 70, 'open', 'D', '203'),
+  ('201402', '08301003', '0301', '星期四3-4', 80, 'open', 'E', '303'),
+  ('201402', '08307001', '0501', '星期五1-2', 50, 'open', 'F', '101'),
+  ('201402', '08305001', '0103', '星期一1-2', 50, 'open', 'A', '102'),
+  ('201402', '08305004', '0104', '星期一1-2', 60, 'open', 'A', '203'),
+  ('201402', '08302001', '0201', '星期一1-2', 50, 'open', 'B', '101'),
+  ('201402', '08306001', '0401', '星期一1-2', 60, 'open', 'E', '101'),
+  ('201402', '08305002', '0102', '星期一3-4', 55, 'open', 'B', '102'),
+  ('201402', '08305005', '0105', '星期一3-4', 60, 'open', 'B', '202'),
+  ('201402', '08302002', '0202', '星期一3-4', 70, 'open', 'D', '203'),
+  ('201402', '08301001', '0301', '星期一3-4', 60, 'open', 'C', '101'),
+  ('201402', '08305003', '0101', '星期二1-2', 60, 'open', 'C', '102'),
+  ('201402', '08305006', '0101', '星期二1-2', 60, 'open', 'C', '204'),
+  ('201402', '08305007', '0105', '星期二1-2', 70, 'open', 'D', '304'),
+  ('201402', '08301002', '0301', '星期二1-2', 70, 'open', 'E', '202'),
+  ('201402', '08305004', '0101', '星期二3-4', 50, 'open', 'D', '101'),
+  ('201402', '08305008', '0103', '星期二3-4', 70, 'open', 'E', '203'),
+  ('201402', '08302003', '0201', '星期二3-4', 70, 'open', 'F', '204'),
+  ('201402', '08306002', '0401', '星期二3-4', 70, 'open', 'F', '306'),
+  ('201402', '08305001', '0102', '星期三1-2', 60, 'open', 'G', '101'),
+  ('201402', '08305007', '0101', '星期三1-2', 60, 'open', 'G', '102'),
+  ('201402', '08302001', '0202', '星期三1-2', 70, 'open', 'G', '203'),
+  ('201402', '08301002', '0102', '星期三1-2', 70, 'open', 'A', '304'),
+  ('201402', '08305002', '0103', '星期三3-4', 55, 'open', 'B', '405'),
+  ('201402', '08305005', '0101', '星期三3-4', 60, 'open', 'C', '405'),
+  ('201402', '08302002', '0201', '星期三3-4', 70, 'open', 'D', '405'),
+  ('201402', '08301001', '0102', '星期三3-4', 70, 'open', 'E', '405'),
+  ('201402', '08305006', '0103', '星期四1-2', 70, 'open', 'F', '405'),
+  ('201402', '08306001', '0101', '星期四1-2', 60, 'open', 'A', '405'),
+  ('201402', '08305008', '0102', '星期四3-4', 60, 'open', 'C', '102'),
+  ('201402', '08302003', '0101', '星期四3-4', 60, 'open', 'D', '102'),
+  ('201402', '08305009', '0105', '星期五1-2', 80, 'open', 'E', '203'),
+  ('201402', '08306002', '0501', '星期五1-2', 70, 'open', 'G', '305');
 
 -- bcrypt hash generated for plaintext password: 123456
 SET @default_password_hash = '$2b$10$KPmJk68I/oJ01w9MleuPouus0itqy7t3McS3B0/KkH7AOSfObPIUu';
 
-INSERT INTO users (username, password_hash, role, status)
-VALUES ('admin', @default_password_hash, 'admin', 'active');
+INSERT INTO users (password_hash, status)
+VALUES (@default_password_hash, 'active');
 
-INSERT INTO admin_profiles (user_id, display_name)
-SELECT user_id, '系统管理员'
+INSERT INTO admin_accounts (user_id, username, display_name)
+SELECT user_id, 'admin', '系统管理员'
 FROM users
-WHERE username = 'admin';
+WHERE user_id = LAST_INSERT_ID();
 
-INSERT INTO users (username, password_hash, role, student_id, status)
-SELECT student_id, @default_password_hash, 'student', student_id, 'active'
-FROM student;
+INSERT INTO users (password_hash, status)
+SELECT @default_password_hash, 'active'
+FROM student
+ORDER BY student_id;
 
-INSERT INTO users (username, password_hash, role, staff_id, status)
-SELECT staff_id, @default_password_hash, 'teacher', staff_id, 'active'
-FROM teacher;
+SET @student_user_start = LAST_INSERT_ID();
+
+INSERT INTO student_accounts (user_id, student_id)
+SELECT @student_user_start + s.rn - 1, s.student_id
+FROM (
+  SELECT student_id, ROW_NUMBER() OVER (ORDER BY student_id) AS rn
+  FROM student
+) AS s;
+
+INSERT INTO users (password_hash, status)
+SELECT @default_password_hash, 'active'
+FROM teacher
+ORDER BY staff_id;
+
+SET @teacher_user_start = LAST_INSERT_ID();
+
+INSERT INTO teacher_accounts (user_id, staff_id)
+SELECT @teacher_user_start + t.rn - 1, t.staff_id
+FROM (
+  SELECT staff_id, ROW_NUMBER() OVER (ORDER BY staff_id) AS rn
+  FROM teacher
+) AS t;
 
 DROP TEMPORARY TABLE IF EXISTS seed_course_selection_scores;
 CREATE TEMPORARY TABLE seed_course_selection_scores (
@@ -694,23 +704,27 @@ VALUES
 ON DUPLICATE KEY UPDATE
   score = VALUES(score);
 
-INSERT INTO course_selection (student_id, semester, course_id, staff_id)
-SELECT student_id, semester, course_id, staff_id
-FROM seed_course_selection_scores;
+INSERT INTO course_selection (student_id, offering_id)
+SELECT seed.student_id, co.offering_id
+FROM seed_course_selection_scores AS seed
+JOIN course_offerings AS co
+  ON co.semester_id = seed.semester
+ AND co.course_id = seed.course_id
+ AND co.staff_id = seed.staff_id;
 
 UPDATE grades AS g
 JOIN course_selection AS cs ON cs.selection_id = g.selection_id
+JOIN course_offerings AS co ON co.offering_id = cs.offering_id
 JOIN seed_course_selection_scores AS seed
   ON seed.student_id = cs.student_id
- AND seed.semester = cs.semester
- AND seed.course_id = cs.course_id
- AND seed.staff_id = cs.staff_id
+ AND seed.semester = co.semester_id
+ AND seed.course_id = co.course_id
+ AND seed.staff_id = co.staff_id
 SET g.regular_score = seed.score,
-    g.exam_score = seed.score,
-    g.graded_at = IF(seed.score IS NULL, NULL, COALESCE(g.graded_at, NOW()));
+    g.exam_score = seed.score;
 
 -- Clean invalid historical selections introduced by older seed versions.
--- Keep the graded selection first, then the earlier selected record.
+-- Keep the graded selection first, then the lower generated selection id.
 DELETE cs
 FROM course_selection AS cs
 JOIN (
@@ -719,12 +733,12 @@ JOIN (
     SELECT
       cs.selection_id,
       ROW_NUMBER() OVER (
-        PARTITION BY student_id, semester, course_id
+        PARTITION BY cs.student_id, co.semester_id, co.course_id
         ORDER BY (g.regular_score IS NOT NULL AND g.exam_score IS NOT NULL) DESC,
-                 cs.selected_at ASC,
                  cs.selection_id ASC
       ) AS rn
     FROM course_selection AS cs
+    JOIN course_offerings AS co ON co.offering_id = cs.offering_id
     LEFT JOIN grades AS g ON g.selection_id = cs.selection_id
   ) AS ranked_same_course
   WHERE rn > 1
@@ -738,17 +752,13 @@ JOIN (
     SELECT
       cs.selection_id,
       ROW_NUMBER() OVER (
-        PARTITION BY cs.student_id, c.semester, c.class_time
+        PARTITION BY cs.student_id, c.semester_id, c.class_time
         ORDER BY (g.regular_score IS NOT NULL AND g.exam_score IS NOT NULL) DESC,
-                 cs.selected_at ASC,
                  cs.selection_id ASC
       ) AS rn
     FROM course_selection AS cs
     LEFT JOIN grades AS g ON g.selection_id = cs.selection_id
-    JOIN class AS c
-      ON c.semester = cs.semester
-     AND c.course_id = cs.course_id
-     AND c.staff_id = cs.staff_id
+    JOIN course_offerings AS c ON c.offering_id = cs.offering_id
   ) AS ranked_same_time
   WHERE rn > 1
 ) AS invalid_same_time ON invalid_same_time.selection_id = cs.selection_id;
@@ -768,10 +778,7 @@ SELECT
   CASE
     WHEN regular_score IS NULL OR exam_score IS NULL THEN 'pending'
     ELSE 'submitted'
-  END AS grade_status,
-  graded_at,
-  created_at,
-  updated_at
+  END AS grade_status
 FROM grades;
 
 DROP PROCEDURE IF EXISTS sp_course_grade_statistics;
@@ -782,7 +789,7 @@ CREATE PROCEDURE sp_course_grade_statistics(IN p_offering_id BIGINT UNSIGNED)
 BEGIN
   SELECT
     c.offering_id,
-    c.semester,
+    c.semester_id AS semester,
     c.course_id,
     co.course_name,
     c.staff_id,
@@ -795,16 +802,13 @@ BEGIN
     SUM(CASE WHEN g.score >= 60 THEN 1 ELSE 0 END) AS pass_count,
     SUM(CASE WHEN g.score IS NOT NULL AND g.score < 60 THEN 1 ELSE 0 END) AS fail_count,
     SUM(CASE WHEN g.score >= 90 THEN 1 ELSE 0 END) AS excellent_count
-  FROM `class` AS c
+  FROM course_offerings AS c
   JOIN course AS co ON co.course_id = c.course_id
   JOIN teacher AS t ON t.staff_id = c.staff_id
-  LEFT JOIN course_selection AS cs
-    ON cs.semester = c.semester
-   AND cs.course_id = c.course_id
-   AND cs.staff_id = c.staff_id
+  LEFT JOIN course_selection AS cs ON cs.offering_id = c.offering_id
   LEFT JOIN v_grades AS g ON g.selection_id = cs.selection_id
   WHERE c.offering_id = p_offering_id
-  GROUP BY c.offering_id, c.semester, c.course_id, co.course_name, c.staff_id, t.name;
+  GROUP BY c.offering_id, c.semester_id, c.course_id, co.course_name, c.staff_id, t.name;
 END $$
 
 DELIMITER ;
@@ -819,7 +823,8 @@ SELECT
   g.score
 FROM student AS s
 JOIN course_selection AS cs ON s.student_id = cs.student_id
-JOIN course AS c ON cs.course_id = c.course_id
+JOIN course_offerings AS co ON co.offering_id = cs.offering_id
+JOIN course AS c ON c.course_id = co.course_id
 JOIN v_grades AS g ON g.selection_id = cs.selection_id
 WHERE s.dept_id = (SELECT dept_id FROM department WHERE dept_name = '计算机学院')
   AND g.score < 60;
@@ -827,7 +832,7 @@ WHERE s.dept_id = (SELECT dept_id FROM department WHERE dept_name = '计算机�
 CREATE OR REPLACE VIEW v_course_offering_detail AS
 SELECT
   c.offering_id,
-  c.semester,
+  c.semester_id AS semester,
   s.semester_name,
   c.course_id,
   co.course_name,
@@ -838,24 +843,21 @@ SELECT
   c.staff_id,
   t.name AS teacher_name,
   c.class_time,
-  c.classroom,
+  CONCAT(c.classroom_building_no, c.classroom_room_no) AS classroom,
   c.capacity,
   c.status,
   COUNT(cs.selection_id) AS selected_count,
   (c.capacity - COUNT(cs.selection_id)) AS remaining_capacity
-FROM `class` AS c
+FROM course_offerings AS c
 JOIN course AS co ON co.course_id = c.course_id
 JOIN department AS d ON d.dept_id = co.dept_id
 JOIN teacher AS t ON t.staff_id = c.staff_id
-LEFT JOIN semesters AS s ON s.semester_id = c.semester
-LEFT JOIN course_selection AS cs
-  ON cs.semester = c.semester
- AND cs.course_id = c.course_id
- AND cs.staff_id = c.staff_id
+LEFT JOIN semesters AS s ON s.semester_id = c.semester_id
+LEFT JOIN course_selection AS cs ON cs.offering_id = c.offering_id
 GROUP BY
-  c.offering_id, c.semester, s.semester_name, c.course_id, co.course_name,
+  c.offering_id, c.semester_id, s.semester_name, c.course_id, co.course_name,
   co.credit, co.credit_hours, co.dept_id, d.dept_name, c.staff_id, t.name,
-  c.class_time, c.classroom, c.capacity, c.status;
+  c.class_time, c.classroom_building_no, c.classroom_room_no, c.capacity, c.status;
 
 CREATE OR REPLACE VIEW v_student_timetable AS
 SELECT
@@ -863,26 +865,23 @@ SELECT
   cs.student_id,
   st.name AS student_name,
   c.offering_id,
-  c.semester,
+  c.semester_id AS semester,
   co.course_id,
   co.course_name,
   t.staff_id,
   t.name AS teacher_name,
   c.class_time,
-  c.classroom
+  CONCAT(c.classroom_building_no, c.classroom_room_no) AS classroom
 FROM course_selection AS cs
 JOIN student AS st ON st.student_id = cs.student_id
-JOIN `class` AS c
-  ON c.semester = cs.semester
- AND c.course_id = cs.course_id
- AND c.staff_id = cs.staff_id
+JOIN course_offerings AS c ON c.offering_id = cs.offering_id
 JOIN course AS co ON co.course_id = c.course_id
 JOIN teacher AS t ON t.staff_id = c.staff_id;
 
 CREATE OR REPLACE VIEW v_course_grade_summary AS
 SELECT
   c.offering_id,
-  c.semester,
+  c.semester_id AS semester,
   c.course_id,
   co.course_name,
   c.staff_id,
@@ -892,15 +891,12 @@ SELECT
   ROUND(AVG(g.score), 2) AS average_score,
   MAX(g.score) AS max_score,
   MIN(g.score) AS min_score
-FROM `class` AS c
+FROM course_offerings AS c
 JOIN course AS co ON co.course_id = c.course_id
 JOIN teacher AS t ON t.staff_id = c.staff_id
-LEFT JOIN course_selection AS cs
-  ON cs.semester = c.semester
- AND cs.course_id = c.course_id
- AND cs.staff_id = c.staff_id
+LEFT JOIN course_selection AS cs ON cs.offering_id = c.offering_id
 LEFT JOIN v_grades AS g ON g.selection_id = cs.selection_id
-GROUP BY c.offering_id, c.semester, c.course_id, co.course_name, c.staff_id, t.name;
+GROUP BY c.offering_id, c.semester_id, c.course_id, co.course_name, c.staff_id, t.name;
 
 CREATE OR REPLACE VIEW v_teacher_course_summary AS
 SELECT
@@ -909,11 +905,8 @@ SELECT
   COUNT(DISTINCT c.offering_id) AS offering_count,
   COUNT(cs.selection_id) AS student_count
 FROM teacher AS t
-LEFT JOIN `class` AS c ON c.staff_id = t.staff_id
-LEFT JOIN course_selection AS cs
-  ON cs.semester = c.semester
- AND cs.course_id = c.course_id
- AND cs.staff_id = c.staff_id
+LEFT JOIN course_offerings AS c ON c.staff_id = t.staff_id
+LEFT JOIN course_selection AS cs ON cs.offering_id = c.offering_id
 GROUP BY t.staff_id, t.name;
 
 SELECT 'school database rebuilt successfully' AS message;

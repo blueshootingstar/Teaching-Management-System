@@ -1,5 +1,6 @@
 import { DeleteOutlined, ReloadOutlined, SearchOutlined, SelectOutlined } from '@ant-design/icons';
 import {
+  Alert,
   Button,
   Checkbox,
   Input,
@@ -39,6 +40,7 @@ export default function StudentDashboard() {
   const [courseSemester, setCourseSemester] = useState<string>();
   const [gradeSemester, setGradeSemester] = useState<string>();
   const [filters, setFilters] = useState(initialFilters);
+  const [selectionWindowOpen, setSelectionWindowOpen] = useState<boolean | null>(null);
 
   const loadSemesters = async () => {
     const data = await request.get<AnyRecord[]>('/student/semesters');
@@ -61,6 +63,14 @@ export default function StudentDashboard() {
     setAvailableRows(data);
   };
 
+  const loadSelectionWindow = async () => {
+    const data = await request.get<AnyRecord>('/student/course-selection-window');
+    const isOpen = Boolean(data.is_open);
+    setSelectionWindowOpen(isOpen);
+    if (!isOpen) setAvailableRows([]);
+    return isOpen;
+  };
+
   const loadCourses = async (semester = courseSemester || currentSemesterId) => {
     const data = await request.get<AnyRecord[]>('/student/my-courses', {
       params: { semester }
@@ -74,8 +84,12 @@ export default function StudentDashboard() {
   };
 
   const reloadAll = async () => {
-    const current = await loadSemesters();
-    await Promise.all([loadAvailable(), loadCourses(courseSemester || current), loadGrades()]);
+    const [current, isSelectionOpen] = await Promise.all([loadSemesters(), loadSelectionWindow()]);
+    await Promise.all([
+      isSelectionOpen ? loadAvailable() : Promise.resolve(),
+      loadCourses(courseSemester || current),
+      loadGrades()
+    ]);
   };
 
   useEffect(() => {
@@ -108,6 +122,13 @@ export default function StudentDashboard() {
   const resetFilters = async () => {
     setFilters(initialFilters);
     await loadAvailable(initialFilters);
+  };
+
+  const reloadAvailableArea = async () => {
+    const isSelectionOpen = await loadSelectionWindow();
+    if (isSelectionOpen) {
+      await loadAvailable();
+    }
   };
 
   const availableColumns: ColumnsType<AnyRecord> = [
@@ -195,6 +216,15 @@ export default function StudentDashboard() {
         if (record.score !== null && record.score !== undefined) {
           return <Button disabled>已出成绩</Button>;
         }
+        if (!selectionWindowOpen) {
+          return (
+            <Tooltip title="当前不在选课时间，暂不能退课">
+              <span>
+                <Button danger disabled icon={<DeleteOutlined />}>退选</Button>
+              </span>
+            </Tooltip>
+          );
+        }
         return (
           <Popconfirm title="确认退选？" onConfirm={() => dropCourse(record.selection_id)}>
             <Button danger icon={<DeleteOutlined />}>退选</Button>
@@ -267,35 +297,48 @@ export default function StudentDashboard() {
             <div className="page-card">
               <div className="toolbar">
                 <Typography.Title level={4}>当前学期课程查询</Typography.Title>
-                <Button icon={<ReloadOutlined />} onClick={() => loadAvailable()} />
+                <Button icon={<ReloadOutlined />} onClick={reloadAvailableArea} />
               </div>
-              <Space wrap className="course-filter-bar">
-                <Input
-                  allowClear
-                  placeholder="课程号 / 课程名称 / 教师号 / 教师名称"
-                  value={filters.keyword}
-                  onChange={(event) => setFilters((prev) => ({ ...prev, keyword: event.target.value }))}
-                  onPressEnter={() => loadAvailable()}
-                  style={{ width: 320 }}
+              {selectionWindowOpen === null ? (
+                <Alert type="info" showIcon message="正在读取选课状态" />
+              ) : selectionWindowOpen ? (
+                <>
+                  <Space wrap className="course-filter-bar">
+                    <Input
+                      allowClear
+                      placeholder="课程号 / 课程名称 / 教师号 / 教师名称"
+                      value={filters.keyword}
+                      onChange={(event) => setFilters((prev) => ({ ...prev, keyword: event.target.value }))}
+                      onPressEnter={() => loadAvailable()}
+                      style={{ width: 320 }}
+                    />
+                    <Checkbox
+                      checked={filters.hasCapacity}
+                      onChange={(event) => setFilters((prev) => ({ ...prev, hasCapacity: event.target.checked }))}
+                    >
+                      有余量
+                    </Checkbox>
+                    <Checkbox
+                      checked={filters.onlyUnselected}
+                      onChange={(event) => setFilters((prev) => ({ ...prev, onlyUnselected: event.target.checked }))}
+                    >
+                      未选
+                    </Checkbox>
+                    <Button type="primary" icon={<SearchOutlined />} onClick={() => loadAvailable()}>
+                      查询
+                    </Button>
+                    <Button onClick={resetFilters}>重置</Button>
+                  </Space>
+                  <Table rowKey="offering_id" columns={availableColumns} dataSource={availableRows} scroll={{ x: 1100 }} />
+                </>
+              ) : (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message="当前不在选课时间"
+                  description="请等待管理员开启选课后再查询和选择课程。"
                 />
-                <Checkbox
-                  checked={filters.hasCapacity}
-                  onChange={(event) => setFilters((prev) => ({ ...prev, hasCapacity: event.target.checked }))}
-                >
-                  有余量
-                </Checkbox>
-                <Checkbox
-                  checked={filters.onlyUnselected}
-                  onChange={(event) => setFilters((prev) => ({ ...prev, onlyUnselected: event.target.checked }))}
-                >
-                  未选
-                </Checkbox>
-                <Button type="primary" icon={<SearchOutlined />} onClick={() => loadAvailable()}>
-                  查询
-                </Button>
-                <Button onClick={resetFilters}>重置</Button>
-              </Space>
-              <Table rowKey="offering_id" columns={availableColumns} dataSource={availableRows} scroll={{ x: 1100 }} />
+              )}
             </div>
           )
         },

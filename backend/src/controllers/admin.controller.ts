@@ -1,7 +1,8 @@
 import bcrypt from 'bcryptjs';
 import type { Request, Response } from 'express';
-import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
+import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { execute, getConnection, query } from '../db/mysql';
+import { courseSelectionWindowPayload, getCourseSelectionOpen, setCourseSelectionOpen } from '../services/systemSettings';
 import { fail, success } from '../utils/response';
 
 const DEFAULT_PASSWORD = '123456';
@@ -77,25 +78,49 @@ function buildNextSemester(maxSemesterId: string) {
   };
 }
 
+function parseClassroom(value: unknown) {
+  const text = String(value || '').trim().toUpperCase();
+  const match = text.match(/^([A-Z])(.+)$/);
+  if (!match) return null;
+  return {
+    classroom: `${match[1]}${match[2]}`,
+    buildingNo: match[1],
+    roomNo: match[2]
+  };
+}
+
 async function upsertUser(
   conn: PoolConnection,
-  username: string,
   role: 'student' | 'teacher',
   password: string | undefined,
   bindId: string
 ) {
   const passwordHash = await bcrypt.hash(password || DEFAULT_PASSWORD, 10);
-  const studentId = role === 'student' ? bindId : null;
-  const staffId = role === 'teacher' ? bindId : null;
+  const accountTable = role === 'student' ? 'student_accounts' : 'teacher_accounts';
+  const bindColumn = role === 'student' ? 'student_id' : 'staff_id';
+  const [existingRows] = await conn.query<RowDataPacket[]>(
+    `SELECT u.user_id
+     FROM ${accountTable} AS account
+     JOIN users AS u ON u.user_id = account.user_id
+     WHERE account.${bindColumn} = ?
+     LIMIT 1`,
+    [bindId]
+  );
+  const existingUserId = existingRows[0]?.user_id;
+  if (existingUserId) {
+    await conn.execute('UPDATE users SET status = ? WHERE user_id = ?', ['active', existingUserId]);
+    return;
+  }
+
+  const [userResult] = await conn.execute<ResultSetHeader>(
+    `INSERT INTO users (password_hash, status)
+     VALUES (?, 'active')`,
+    [passwordHash]
+  );
   await conn.execute(
-    `INSERT INTO users (username, password_hash, role, student_id, staff_id, status)
-     VALUES (?, ?, ?, ?, ?, 'active')
-     ON DUPLICATE KEY UPDATE
-       student_id = VALUES(student_id),
-       staff_id = VALUES(staff_id),
-       role = VALUES(role),
-       status = 'active'`,
-    [username, passwordHash, role, studentId, staffId]
+    `INSERT INTO ${accountTable} (user_id, ${bindColumn})
+     VALUES (?, ?)`,
+    [userResult.insertId, bindId]
   );
 }
 
@@ -106,12 +131,23 @@ export async function listDepartments(_req: Request, res: Response) {
 
 export async function listClassrooms(_req: Request, res: Response) {
   const rows = await query<RowDataPacket[]>(
-    `SELECT classroom_id, building, floor_no, room_no, capacity, status
+    `SELECT CONCAT(building_no, room_no) AS classroom, building_no, room_no, capacity, status
      FROM classrooms
      WHERE status = 'available'
-     ORDER BY building, floor_no, room_no`
+     ORDER BY building_no, CAST(room_no AS UNSIGNED), room_no`
   );
   return success(res, rows);
+}
+
+export async function getCourseSelectionWindow(_req: Request, res: Response) {
+  const isOpen = await getCourseSelectionOpen();
+  return success(res, courseSelectionWindowPayload(isOpen));
+}
+
+export async function updateCourseSelectionWindow(req: Request, res: Response) {
+  const isOpen = req.body?.is_open === true || req.body?.is_open === 1 || req.body?.is_open === '1';
+  await setCourseSelectionOpen(isOpen);
+  return success(res, courseSelectionWindowPayload(isOpen));
 }
 
 export async function listStudents(_req: Request, res: Response) {
@@ -157,7 +193,7 @@ export async function createStudent(req: Request, res: Response) {
         body.status || '正常'
       ]
     );
-    await upsertUser(conn, body.student_id, 'student', body.password, body.student_id);
+    await upsertUser(conn, 'student', body.password, body.student_id);
     await conn.commit();
     return success(res, null, 'created', 201);
   } catch (error) {
@@ -204,7 +240,13 @@ export async function deleteStudent(req: Request, res: Response) {
   const conn = await getConnection();
   try {
     await conn.beginTransaction();
-    await conn.execute('DELETE FROM users WHERE student_id = ?', [req.params.id]);
+    await conn.execute(
+      `DELETE u
+       FROM users AS u
+       JOIN student_accounts AS sa ON sa.user_id = u.user_id
+       WHERE sa.student_id = ?`,
+      [req.params.id]
+    );
     await conn.execute('DELETE FROM student WHERE student_id = ?', [req.params.id]);
     await conn.commit();
     return success(res);
@@ -225,7 +267,7 @@ export async function listTeachers(_req: Request, res: Response) {
      JOIN department AS d ON d.dept_id = t.dept_id
      LEFT JOIN (
        SELECT staff_id, COUNT(*) AS offering_count
-       FROM class
+       FROM course_offerings
        GROUP BY staff_id
      ) AS offering_counts ON offering_counts.staff_id = t.staff_id
      ORDER BY t.staff_id`
@@ -243,7 +285,7 @@ export async function createTeacher(req: Request, res: Response) {
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [body.staff_id, body.name, body.sex, body.date_of_birth, body.professional_ranks, body.salary, body.dept_id]
     );
-    await upsertUser(conn, body.staff_id, 'teacher', body.password, body.staff_id);
+    await upsertUser(conn, 'teacher', body.password, body.staff_id);
     await conn.commit();
     return success(res, null, 'created', 201);
   } catch (error) {
@@ -267,7 +309,7 @@ export async function updateTeacher(req: Request, res: Response) {
 
 export async function deleteTeacher(req: Request, res: Response) {
   const dependencyRows = await query<RowDataPacket[]>(
-    'SELECT COUNT(*) AS offering_count FROM class WHERE staff_id = ?',
+    'SELECT COUNT(*) AS offering_count FROM course_offerings WHERE staff_id = ?',
     [req.params.id]
   );
   const reason = teacherDeleteReason(dependencyRows[0]);
@@ -276,7 +318,13 @@ export async function deleteTeacher(req: Request, res: Response) {
   const conn = await getConnection();
   try {
     await conn.beginTransaction();
-    await conn.execute('DELETE FROM users WHERE staff_id = ?', [req.params.id]);
+    await conn.execute(
+      `DELETE u
+       FROM users AS u
+       JOIN teacher_accounts AS ta ON ta.user_id = u.user_id
+       WHERE ta.staff_id = ?`,
+      [req.params.id]
+    );
     await conn.execute('DELETE FROM teacher WHERE staff_id = ?', [req.params.id]);
     await conn.commit();
     return success(res);
@@ -298,13 +346,14 @@ export async function listCourses(_req: Request, res: Response) {
      JOIN department AS d ON d.dept_id = c.dept_id
      LEFT JOIN (
        SELECT course_id, COUNT(*) AS offering_count
-       FROM class
+       FROM course_offerings
        GROUP BY course_id
      ) AS offering_counts ON offering_counts.course_id = c.course_id
      LEFT JOIN (
-       SELECT course_id, COUNT(*) AS selection_count
-       FROM course_selection
-       GROUP BY course_id
+       SELECT co.course_id, COUNT(*) AS selection_count
+       FROM course_selection AS cs
+       JOIN course_offerings AS co ON co.offering_id = cs.offering_id
+       GROUP BY co.course_id
      ) AS selection_counts ON selection_counts.course_id = c.course_id
      ORDER BY c.course_id`
   );
@@ -335,8 +384,11 @@ export async function updateCourse(req: Request, res: Response) {
 export async function deleteCourse(req: Request, res: Response) {
   const dependencyRows = await query<RowDataPacket[]>(
     `SELECT
-       (SELECT COUNT(*) FROM class WHERE course_id = ?) AS offering_count,
-       (SELECT COUNT(*) FROM course_selection WHERE course_id = ?) AS selection_count`,
+       (SELECT COUNT(*) FROM course_offerings WHERE course_id = ?) AS offering_count,
+       (SELECT COUNT(*)
+        FROM course_selection AS cs
+        JOIN course_offerings AS co ON co.offering_id = cs.offering_id
+        WHERE co.course_id = ?) AS selection_count`,
     [req.params.id, req.params.id]
   );
   const reason = courseDeleteReason(dependencyRows[0]);
@@ -353,9 +405,7 @@ export async function listSemesters(_req: Request, res: Response) {
        semester_name,
        DATE_FORMAT(start_date, '%Y-%m-%d') AS start_date,
        DATE_FORMAT(end_date, '%Y-%m-%d') AS end_date,
-       is_current,
-       created_at,
-       updated_at
+       is_current
      FROM semesters
      ORDER BY semester_id DESC`
   );
@@ -432,32 +482,23 @@ export async function deleteSemester(_req: Request, res: Response) {
 export async function listCourseOfferings(_req: Request, res: Response) {
   const rows = await query<RowDataPacket[]>(
     `SELECT
-       c.offering_id, c.semester, s.semester_name, c.course_id, co.course_name,
-       c.staff_id, t.name AS teacher_name, c.class_time, c.classroom,
+       c.offering_id, c.semester_id AS semester, s.semester_name, c.course_id, co.course_name,
+       c.staff_id, t.name AS teacher_name, c.class_time,
+       CONCAT(c.classroom_building_no, c.classroom_room_no) AS classroom,
        c.capacity, c.status,
-       COALESCE(selected_counts.selected_count, 0) AS selected_count,
+       COALESCE(selection_counts.selection_count, 0) AS selected_count,
        COALESCE(selection_counts.selection_count, 0) AS selection_count
-     FROM class AS c
+     FROM course_offerings AS c
      JOIN course AS co ON co.course_id = c.course_id
      JOIN teacher AS t ON t.staff_id = c.staff_id
-     LEFT JOIN semesters AS s ON s.semester_id = c.semester
+     LEFT JOIN semesters AS s ON s.semester_id = c.semester_id
      LEFT JOIN (
-       SELECT semester, course_id, staff_id, COUNT(*) AS selected_count
+       SELECT offering_id, COUNT(*) AS selection_count
        FROM course_selection
-       GROUP BY semester, course_id, staff_id
-     ) AS selected_counts
-       ON selected_counts.semester = c.semester
-      AND selected_counts.course_id = c.course_id
-      AND selected_counts.staff_id = c.staff_id
-     LEFT JOIN (
-       SELECT semester, course_id, staff_id, COUNT(*) AS selection_count
-       FROM course_selection
-       GROUP BY semester, course_id, staff_id
+       GROUP BY offering_id
      ) AS selection_counts
-       ON selection_counts.semester = c.semester
-      AND selection_counts.course_id = c.course_id
-      AND selection_counts.staff_id = c.staff_id
-     ORDER BY c.semester DESC, c.course_id, c.staff_id`
+       ON selection_counts.offering_id = c.offering_id
+     ORDER BY c.semester_id DESC, c.course_id, c.staff_id`
   );
   return success(res, rows.map((row) => addDeleteState(row, offeringDeleteReason(row))));
 }
@@ -467,8 +508,8 @@ export async function createCourseOffering(req: Request, res: Response) {
   const payload = await validateCourseOfferingPayload(body, res);
   if (!payload) return null;
   await execute(
-    `INSERT INTO class (semester, course_id, staff_id, class_time, capacity, status, classroom)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO course_offerings (semester_id, course_id, staff_id, class_time, capacity, status, classroom_building_no, classroom_room_no)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       body.semester,
       body.course_id,
@@ -476,7 +517,8 @@ export async function createCourseOffering(req: Request, res: Response) {
       body.class_time,
       payload.capacity,
       payload.status,
-      payload.classroom
+      payload.classroomBuildingNo,
+      payload.classroomRoomNo
     ]
   );
   return success(res, null, 'created', 201);
@@ -487,8 +529,9 @@ export async function updateCourseOffering(req: Request, res: Response) {
   const payload = await validateCourseOfferingPayload(body, res, Number(req.params.id));
   if (!payload) return null;
   await execute(
-    `UPDATE class
-     SET semester = ?, course_id = ?, staff_id = ?, class_time = ?, capacity = ?, status = ?, classroom = ?
+    `UPDATE course_offerings
+     SET semester_id = ?, course_id = ?, staff_id = ?, class_time = ?, capacity = ?, status = ?,
+         classroom_building_no = ?, classroom_room_no = ?
      WHERE offering_id = ?`,
     [
       body.semester,
@@ -497,7 +540,8 @@ export async function updateCourseOffering(req: Request, res: Response) {
       body.class_time,
       payload.capacity,
       payload.status,
-      payload.classroom,
+      payload.classroomBuildingNo,
+      payload.classroomRoomNo,
       req.params.id
     ]
   );
@@ -509,9 +553,8 @@ export async function deleteCourseOffering(req: Request, res: Response) {
     `SELECT
        c.offering_id,
        COUNT(cs.selection_id) AS selection_count
-     FROM class AS c
-     LEFT JOIN course_selection AS cs
-       ON cs.semester = c.semester AND cs.course_id = c.course_id AND cs.staff_id = c.staff_id
+     FROM course_offerings AS c
+     LEFT JOIN course_selection AS cs ON cs.offering_id = c.offering_id
      WHERE c.offering_id = ?
      GROUP BY c.offering_id`,
     [req.params.id]
@@ -520,14 +563,14 @@ export async function deleteCourseOffering(req: Request, res: Response) {
   const reason = offeringDeleteReason(dependencyRows[0]);
   if (reason) return fail(res, reason);
 
-  await execute('DELETE FROM class WHERE offering_id = ?', [req.params.id]);
+  await execute('DELETE FROM course_offerings WHERE offering_id = ?', [req.params.id]);
   return success(res);
 }
 
 async function validateCourseOfferingPayload(body: any, res: Response, offeringId?: number) {
   const capacity = Number(body.capacity);
   const status = body.status || 'open';
-  const classroom = body.classroom;
+  const classroom = parseClassroom(body.classroom);
 
   if (!classroom) {
     fail(res, '请选择教室');
@@ -543,11 +586,11 @@ async function validateCourseOfferingPayload(body: any, res: Response, offeringI
   }
 
   const classroomRows = await query<RowDataPacket[]>(
-    `SELECT classroom_id, capacity
+    `SELECT capacity
      FROM classrooms
-     WHERE classroom_id = ? AND status = 'available'
+     WHERE building_no = ? AND room_no = ? AND status = 'available'
      LIMIT 1`,
-    [classroom]
+    [classroom.buildingNo, classroom.roomNo]
   );
   const classroomRow = classroomRows[0];
   if (!classroomRow) {
@@ -562,9 +605,8 @@ async function validateCourseOfferingPayload(body: any, res: Response, offeringI
   if (offeringId) {
     const selectedRows = await query<RowDataPacket[]>(
       `SELECT COUNT(cs.selection_id) AS selected_count
-       FROM class AS c
-       LEFT JOIN course_selection AS cs
-         ON cs.semester = c.semester AND cs.course_id = c.course_id AND cs.staff_id = c.staff_id
+       FROM course_offerings AS c
+       LEFT JOIN course_selection AS cs ON cs.offering_id = c.offering_id
        WHERE c.offering_id = ?`,
       [offeringId]
     );
@@ -575,5 +617,11 @@ async function validateCourseOfferingPayload(body: any, res: Response, offeringI
     }
   }
 
-  return { capacity, status, classroom };
+  return {
+    capacity,
+    status,
+    classroom: classroom.classroom,
+    classroomBuildingNo: classroom.buildingNo,
+    classroomRoomNo: classroom.roomNo
+  };
 }

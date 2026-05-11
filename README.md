@@ -300,13 +300,16 @@ teaching-management-system/frontend
 - `course`：课程
 - `semesters`：学期
 - `classrooms`：教室
-- `class`：开课记录
+- `course_offerings`：开课记录
 - `course_selection`：选课记录
 - `grades`：成绩
-- `users`：登录用户
-- `admin_profiles`：管理员资料
+- `users`：登录凭证
+- `admin_accounts`：管理员账号
+- `student_accounts`：学生账号绑定
+- `teacher_accounts`：教师账号绑定
+- `system_settings`：系统设置
 
-其中 `class` 在本系统里表示“开课记录”，不是行政班级。
+全局选课开关保存在 `system_settings`，管理员可以开启或关闭选课。关闭时学生不展示可选课程列表，但课表和成绩仍可正常查看。
 
 ## 本地启动顺序总结
 

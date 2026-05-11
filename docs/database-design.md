@@ -43,21 +43,24 @@ department 1--N student
 department 1--N teacher
 department 1--N course
 
-semesters 1--N class
-course    1--N class
-teacher   1--N class
-classrooms 1--N class
+semesters 1--N course_offerings
+course    1--N course_offerings
+teacher   1--N course_offerings
+classrooms 1--N course_offerings
 
 student 1--N course_selection
-class   1--N course_selection
+course_offerings 1--N course_selection
 course_selection 1--1 grades
 
-users 0/1--1 student
-users 0/1--1 teacher
-users 0/1--1 admin_profiles
+users 1--0/1 admin_accounts
+users 1--0/1 student_accounts
+users 1--0/1 teacher_accounts
+student_accounts N--1 student
+teacher_accounts N--1 teacher
+system_settings 保存全局系统开关
 ```
 
-其中 `class` 表在本系统中表示“开课记录”，不是行政班级。一个开课记录表示某门课程在某个学期由某位教师授课，包含上课时间、教室、容量和开放状态。
+其中 `course_offerings` 表表示“开课记录”。一个开课记录表示某门课程在某个学期由某位教师授课，包含上课时间、教室、容量和开放状态。
 
 ## 4. 表设计详解
 
@@ -69,8 +72,6 @@ users 0/1--1 admin_profiles
 
 - `dept_id`：院系编号，主键，例如 `01`。
 - `dept_name`：院系名称，例如 `计算机学院`。
-- `address`：院系地址，保留原 School 数据。
-- `phone_code`：院系联系电话，保留原 School 数据。
 
 约束与索引：
 
@@ -82,7 +83,7 @@ users 0/1--1 admin_profiles
 - 学生、教师、课程列表通过该表展示院系名称。
 - `v_computer_failed_student` 视图使用院系名称筛选计算机学院学生。
 
-设计说明：该表属于原始 School 基础表，`address` 和 `phone_code` 当前页面展示较少，但作为原始院系资料保留。
+设计说明：该表只保留当前系统实际使用的院系编号和院系名称，学生、教师、课程通过 `dept_id` 关联院系。
 
 ### 4.2 `student` 学生表
 
@@ -108,11 +109,11 @@ users 0/1--1 admin_profiles
 系统使用：
 
 - 管理员学生管理页面进行增删改查。
-- 登录用户表 `users` 通过 `student_id` 绑定学生账号。
+- 登录账号通过 `student_accounts` 绑定学生身份。
 - 学生选课、课表、成绩均以 `student_id` 作为学生身份。
 - 教师查看学生名单时读取学生姓名和联系方式。
 
-设计说明：学生基础信息和登录账号分开。`student` 保存业务实体，`users` 保存认证信息，这样同一个学生实体可以独立于登录密码和账号状态管理。
+设计说明：学生基础信息和登录账号分开。`student` 保存业务实体，`users` 保存认证凭证，`student_accounts` 保存学生账号绑定关系，避免把登录账号和学生资料混在一张表里。
 
 ### 4.3 `teacher` 教师表
 
@@ -138,7 +139,7 @@ users 0/1--1 admin_profiles
 
 - 管理员教师管理页面进行增删改查。
 - 开课管理通过教师下拉选择 `staff_id`。
-- 教师登录后通过 `users.staff_id` 绑定到教师身份。
+- 教师登录后通过 `teacher_accounts.staff_id` 绑定到教师身份。
 - 教师端只展示该教师自己的授课课程和学生名单。
 
 设计说明：教师删除前需要检查是否已有开课记录。若已有开课记录，后端拒绝删除，前端禁用删除按钮并提示原因。
@@ -168,7 +169,7 @@ users 0/1--1 admin_profiles
 - 学生可选课程、课表、成绩页面展示课程名、学分等信息。
 - 统计分析按课程汇总平均分和排名。
 
-设计说明：`course` 只描述课程本身。某课程在哪个学期、哪个老师、哪个教室上课，由 `class` 表描述。
+设计说明：`course` 只描述课程本身。某课程在哪个学期、哪个老师、哪个教室上课，由 `course_offerings` 表描述。
 
 ### 4.5 `semesters` 学期表
 
@@ -181,7 +182,6 @@ users 0/1--1 admin_profiles
 - `start_date`：开始日期。
 - `end_date`：结束日期。
 - `is_current`：是否当前学期。
-- `created_at` / `updated_at`：创建和更新时间。
 
 约束与索引：
 
@@ -192,7 +192,7 @@ users 0/1--1 admin_profiles
 - 学生可选课程默认查询当前学期。
 - 学生课表和成绩页面可以按学期筛选。
 - 管理员可以设置当前学期，也可以新增下一学期。
-- 开课记录通过 `class.semester` 关联学期。
+- 开课记录通过 `course_offerings.semester_id` 关联学期。
 
 业务规则：
 
@@ -206,66 +206,83 @@ users 0/1--1 admin_profiles
 
 设计说明：学期是历史维度，不允许随意修改或删除。否则会影响开课、选课、成绩、统计等历史数据的一致性。
 
-### 4.6 `classrooms` 教室表
+### 4.6 `system_settings` 系统设置表
 
-作用：保存教室基础信息和容量。
+作用：保存系统级设置，不把全局开关冗余到学期、课程或选课表中。
 
 关键字段：
 
-- `classroom_id`：教室编号，主键，例如 `A101`。
-- `building`：楼栋，例如 `A`。
-- `floor_no`：楼层。
-- `room_no`：房间号。
-- `capacity`：教室容量。
-- `status`：教室状态，枚举 `available` / `disabled`。
-- `created_at` / `updated_at`：创建和更新时间。
+- `setting_key`：设置键，主键，例如 `course_selection_open`。
+- `setting_value`：设置值，当前选课开关使用 `1` 表示开放、`0` 表示关闭。
 
 约束与索引：
 
-- 主键：`classroom_id`。
-- 检查约束：`capacity > 0`。
-- 索引：`building, floor_no`。
+- 主键：`setting_key`。
 
 系统使用：
 
-- 管理员开课管理中通过教室下拉选择教室。
-- 后端创建或更新开课记录时校验课程容量不能超过教室容量。
-- 学生课表和教师课程列表展示教室编号。
+- 管理员通过该表控制全局选课开放状态。
+- 学生端读取选课开放状态，关闭时不展示可选课程列表。
+- 后端选课和退课接口都会检查该开关。
 
-设计说明：教室独立建表后，系统可以统一控制容量上限，避免开课容量随意填写。当前脚本初始化 A-G 楼若干常用教室。
+设计说明：选课总开关是系统级事实，不依赖某个学生、课程、学期或开课记录，单独建表更符合第三范式。
 
-### 4.7 `class` 开课表
+### 4.7 `classrooms` 教室表
 
-作用：保存具体开课记录。它表示“某学期某课程由某教师授课”，不是行政班级。
+作用：保存教室位置和容量。
 
 关键字段：
 
-- `offering_id`：开课 ID，自增唯一键，供 REST API 使用。
-- `semester`：学期号，外键。
+- `building_no`：楼栋号，例如 `A`。
+- `room_no`：房间号，例如 `101`。
+- `capacity`：教室容量。
+- `status`：教室状态，枚举 `available` / `disabled`。
+
+约束与索引：
+
+- 主键：`building_no, room_no`。
+- 检查约束：`capacity > 0`。
+
+系统使用：
+
+- 管理员开课管理中通过教室下拉选择教室，接口展示时临时拼成 `A101`。
+- 后端创建或更新开课记录时校验课程容量不能超过教室容量。
+- 学生课表和教师课程列表展示由 `building_no + room_no` 拼出的教室编号。
+
+设计说明：不再存储 `classroom_id` 和 `floor_no`。`classroom_id` 可由楼栋号和房间号拼出；楼层可由当前房间号规则推导，因此不作为基础字段保存，避免传递依赖。
+
+### 4.8 `course_offerings` 开课表
+
+作用：保存具体开课记录。它表示“某学期某课程由某教师授课”。
+
+关键字段：
+
+- `offering_id`：开课 ID，自增主键，供 REST API 使用。
+- `semester_id`：学期号，外键。
 - `course_id`：课程号，外键。
 - `staff_id`：授课教师号，外键。
 - `class_time`：上课时间，例如 `星期三1-4`。
 - `capacity`：课程容量。
 - `status`：开课状态，枚举 `open` / `closed`。
-- `classroom`：教室编号，外键。
-- `created_at` / `updated_at`：创建和更新时间。
+- `classroom_building_no`：教室楼栋号，外键的一部分。
+- `classroom_room_no`：教室房间号，外键的一部分。
 
 约束与索引：
 
-- 原始复合主键：`semester, course_id, staff_id`。
-- 唯一键：`offering_id`。
+- 主键：`offering_id`。
+- 唯一键：`semester_id, course_id, staff_id`，防止同一学期同一教师重复开设同一课程。
 - 外键：
-  - `semester` 引用 `semesters.semester_id`。
+  - `semester_id` 引用 `semesters.semester_id`。
   - `course_id` 引用 `course.course_id`。
   - `staff_id` 引用 `teacher.staff_id`。
-  - `classroom` 引用 `classrooms.classroom_id`。
+  - `classroom_building_no, classroom_room_no` 引用 `classrooms.building_no, classrooms.room_no`。
 - 检查约束：`capacity > 0`。
 - 索引：课程、教师、学期状态、教室。
 
 系统使用：
 
 - 管理员开课管理维护开课记录。
-- 学生可选课程查询以当前学期的 `class` 为数据源。
+- 学生可选课程查询以当前学期的 `course_offerings` 为数据源。
 - 学生选课时通过 `offering_id` 定位开课记录。
 - 教师端通过 `staff_id` 查询自己的授课课程。
 - 统计分析和存储过程以开课记录为统计对象。
@@ -278,30 +295,26 @@ users 0/1--1 admin_profiles
 - 如果已有学生选课，开课容量不能被改小到低于当前已选人数。
 - 如果已有选课记录，开课记录不能删除。
 
-设计说明：保留原始复合主键是为了兼容原 School 数据库。新增 `offering_id` 是为了前后端 API 更方便操作，因为 URL 中传一个 ID 比传学期、课程号、教师号三元组更稳定。
+设计说明：`offering_id` 是开课记录的稳定主键，`semester_id, course_id, staff_id` 作为业务唯一键保留开课自然唯一性。表名直接表达开课语义。
 
-### 4.8 `course_selection` 选课表
+### 4.9 `course_selection` 选课表
 
-作用：保存学生选课记录，也保留原始 School 中的兼容成绩字段。
+作用：保存学生选课记录。
 
 关键字段：
 
-- `selection_id`：选课 ID，自增唯一键，供 REST API 和成绩表关联使用。
+- `selection_id`：选课 ID，自增主键，供 REST API 和成绩表关联使用。
 - `student_id`：学生学号，外键。
-- `semester`：学期号。
-- `course_id`：课程号。
-- `staff_id`：教师号。
-- `selected_at`：选课时间。
-- `created_at` / `updated_at`：创建和更新时间。
+- `offering_id`：开课 ID，外键。
 
 约束与索引：
 
-- 原始复合主键：`student_id, semester, course_id, staff_id`，防止同一学生重复选择同一开课。
-- 唯一键：`selection_id`。
+- 主键：`selection_id`。
+- 唯一键：`student_id, offering_id`，防止同一学生重复选择同一开课。
 - 外键：
   - `student_id` 引用 `student.student_id`。
-  - `semester, course_id, staff_id` 引用 `class` 的复合主键。
-- 索引：`semester, course_id, staff_id`，便于按开课记录统计已选人数。
+  - `offering_id` 引用 `course_offerings.offering_id`。
+- 索引：`offering_id`，便于按开课记录统计已选人数。
 
 系统使用：
 
@@ -319,7 +332,7 @@ users 0/1--1 admin_profiles
 
 设计说明：为满足第三范式，选课表只保存选课事实，不再保存成绩。成绩由 `grades` 表保存平时成绩和考试成绩，并通过 `v_grades` 视图计算总评成绩和状态。
 
-### 4.9 `grades` 成绩表
+### 4.10 `grades` 成绩表
 
 作用：保存独立成绩记录，与选课记录一一对应。
 
@@ -329,8 +342,6 @@ users 0/1--1 admin_profiles
 - `selection_id`：选课 ID，唯一外键。
 - `regular_score`：平时成绩。
 - `exam_score`：考试成绩。
-- `graded_at`：成绩录入时间。
-- `created_at` / `updated_at`：创建和更新时间。
 
 约束与索引：
 
@@ -349,44 +360,38 @@ users 0/1--1 admin_profiles
 
 设计说明：总评成绩和成绩状态不作为基础表字段存储，避免由非主属性决定非主属性造成的更新异常。系统需要展示这些字段时统一读取 `v_grades` 视图。
 
-### 4.10 `users` 用户表
+### 4.11 `users` 与账号绑定表
 
-作用：保存系统登录账号、密码哈希、角色和角色绑定信息。
+作用：保存登录凭证，并通过独立账号表绑定管理员、学生或教师身份。
 
-关键字段：
+`users` 关键字段：
 
 - `user_id`：用户 ID，主键。
-- `username`：登录账号，唯一。
 - `password_hash`：bcrypt 密码哈希。
-- `role`：角色，枚举 `admin` / `teacher` / `student`。
-- `student_id`：学生账号绑定的学号。
-- `staff_id`：教师账号绑定的教工号。
 - `status`：账号状态，枚举 `active` / `disabled`。
-- `last_login_at`：最近登录时间。
-- `created_at` / `updated_at`：创建和更新时间。
+
+账号绑定表：
+
+- `admin_accounts(user_id, username, display_name)`：管理员登录名和显示名。
+- `student_accounts(user_id, student_id)`：学生账号与学号的一一绑定。
+- `teacher_accounts(user_id, staff_id)`：教师账号与教工号的一一绑定。
 
 约束与索引：
 
-- 主键：`user_id`。
-- 唯一键：`username`。
-- 外键：
-  - `student_id` 引用 `student.student_id`。
-  - `staff_id` 引用 `teacher.staff_id`。
-- 检查约束：
-  - 管理员不绑定学生或教师。
-  - 学生必须绑定 `student_id`。
-  - 教师必须绑定 `staff_id`。
-- 索引：角色、学生绑定、教师绑定。
+- `admin_accounts.username` 唯一。
+- `student_accounts.student_id` 唯一并引用 `student.student_id`。
+- `teacher_accounts.staff_id` 唯一并引用 `teacher.staff_id`。
+- 三张账号绑定表均通过 `user_id` 引用 `users.user_id`，并随用户删除级联删除。
 
 系统使用：
 
-- 登录接口按 `username` 查找用户。
-- 使用 bcrypt 校验密码。
-- 登录成功后生成 JWT，JWT 中包含角色和绑定 ID。
-- 学生和教师显示名分别来自 `student.name` 和 `teacher.name`，管理员显示名来自 `admin_profiles`。
-- 前端根据角色进入管理员、教师或学生界面。
+- 登录接口先按输入账号匹配管理员用户名、学生学号或教师教工号。
+- 使用 `users.password_hash` 校验密码。
+- 登录成功后根据命中的账号绑定表推导角色，并把角色放入 JWT。
+- 学生和教师显示名分别来自 `student.name` 和 `teacher.name`，管理员显示名来自 `admin_accounts.display_name`。
+- 前端根据 JWT 中的角色进入管理员、教师或学生界面。
 
-设计说明：登录账号与业务实体分离后，学生和教师基础信息可以独立维护。为满足第三范式，`users` 不重复保存学生或教师姓名，避免姓名修改时出现多处不一致。
+设计说明：`users` 不再保存 `username`、`role`、`student_id`、`staff_id`。学生和教师的登录账号本来就是学号/教工号，角色也可由账号绑定表推出，因此拆表后避免了重复表达同一个身份事实。
 
 ## 5. 触发器设计
 
@@ -468,9 +473,10 @@ users 0/1--1 admin_profiles
 学生选课时后端检查：
 
 - 开课记录必须存在。
-- `class.status` 必须为 `open`。
+- 全局选课开关 `course_selection_open` 必须为 `1`。
+- `course_offerings.status` 必须为 `open`。
 - 学生不能重复选择同一开课。
-- 当前已选人数不能超过 `class.capacity`。
+- 当前已选人数不能超过 `course_offerings.capacity`。
 - 同一学期不能选择相同 `class_time` 的课程。
 
 ### 8.2 退课规则
@@ -478,6 +484,7 @@ users 0/1--1 admin_profiles
 学生退课时后端检查：
 
 - 选课记录必须属于当前学生。
+- 全局选课开关 `course_selection_open` 必须为 `1`。
 - 若成绩已录入，则不能退课。
 - 未录成绩的选课记录可以删除。
 
@@ -493,7 +500,6 @@ users 0/1--1 admin_profiles
 
 - 更新 `grades.regular_score`。
 - 更新 `grades.exam_score`。
-- 更新 `grades.graded_at`。
 - 总评成绩和提交状态由 `v_grades` 视图计算，不写入基础表。
 
 ### 8.4 GPA 规则
@@ -538,27 +544,27 @@ GPA 不直接存入数据库，由前端基于成绩和学分计算。规则为�
 
 当前最终版基础表按第三范式整理：
 
-- `course_selection` 只保存学生、开课记录和选课状态，不保存成绩。
-- `grades` 只保存平时成绩、考试成绩和录入时间，不保存可推导的总评成绩和成绩状态。
+- `course_selection` 只保存学生和开课记录这组选课事实，不保存成绩、状态或时间戳。
+- `course_selection` 通过 `offering_id` 引用开课记录，不重复保存学期、课程、教师等可由开课记录确定的信息。
+- `course_offerings` 通过 `classroom_building_no, classroom_room_no` 引用教室，不保存可由教室主键拼出的 `classroom_id`。
+- `classrooms` 不保存 `floor_no`，避免 `room_no -> floor_no` 带来的传递依赖。
+- `system_settings` 只保存系统级设置，选课总开关不放入学期、课程、开课或选课表。
+- `grades` 只保存平时成绩和考试成绩，不保存可推导的总评成绩和成绩状态。
 - `v_grades` 视图统一计算 `score` 和 `grade_status`，保证前后端接口仍能直接读取这些展示字段。
-- `users` 只保存认证账号和角色绑定，不重复保存学生或教师姓名。
-- `admin_profiles` 只保存管理员账号特有的显示名。
+- `users` 只保存认证凭证和账号状态，角色和绑定身份由 `admin_accounts`、`student_accounts`、`teacher_accounts` 推导。
+- `admin_accounts` 只保存管理员账号特有的登录名和显示名。
 
-这些调整消除了成绩和显示名的重复存储，避免同一事实在多个基础表中同步失败。
+这些调整消除了成绩、教室编号、楼层、角色绑定和显示名的重复存储，避免同一事实在多个基础表中同步失败。
 
-- `class` 的复合主键与 `offering_id`：
-  - 复合主键 `semester, course_id, staff_id` 来自原始 School。
+- `course_offerings` 的业务唯一键与 `offering_id`：
+  - 业务唯一键 `semester_id, course_id, staff_id` 保证开课自然唯一。
   - `offering_id` 方便 REST API 使用单个 ID 操作开课。
 
-- `course_selection` 的复合主键与 `selection_id`：
-  - 复合主键防止同一学生重复选择同一开课。
+- `course_selection` 的业务唯一键与 `selection_id`：
+  - 业务唯一键 `student_id, offering_id` 防止同一学生重复选择同一开课。
   - `selection_id` 方便退课、成绩关联和 API 操作。
 
-- 时间戳字段：
-  - `created_at`、`updated_at`、`selected_at` 等字段用于审计和未来扩展。
-  - 当前页面不一定全部展示，但对后续追踪数据变化有意义。
-
-这些设计保留了原始 School 数据库的复合业务键，同时通过视图和代理键兼顾系统开发便利。
+这些设计保留了原始 School 数据库的复合业务键，同时通过视图和必要代理键兼顾系统开发便利；未被当前系统使用的预留时间戳字段不再保存。
 
 ## 10. 测试数据说明
 
@@ -592,17 +598,17 @@ GPA 不直接存入数据库，由前端基于成绩和学分计算。规则为�
 
 ## 11. 与系统模块的对应关系
 
-- 管理员学生管理：`student`、`department`、`users`、`course_selection`、`grades`。
-- 管理员教师管理：`teacher`、`department`、`users`、`class`。
-- 管理员课程管理：`course`、`department`、`class`、`course_selection`。
-- 管理员学期管理：`semesters`、`class`。
-- 管理员开课管理：`class`、`course`、`teacher`、`semesters`、`classrooms`、`course_selection`。
-- 学生选课：`class`、`course`、`teacher`、`course_selection`、`grades`。
-- 学生课表：`course_selection`、`class`、`course`、`teacher`。
-- 学生成绩：`course_selection`、`grades`、`class`、`course`、`teacher`。
-- 教师课程：`class`、`course`、`course_selection`。
-- 教师成绩录入：`grades`、`course_selection`、`class`。
-- 统计分析：`sp_course_grade_statistics`、`grades`、`course_selection`、`class`、`course`、`teacher`、`student`。
+- 管理员学生管理：`student`、`department`、`users`、`student_accounts`、`course_selection`、`grades`。
+- 管理员教师管理：`teacher`、`department`、`users`、`teacher_accounts`、`course_offerings`。
+- 管理员课程管理：`course`、`department`、`course_offerings`、`course_selection`。
+- 管理员学期管理：`semesters`、`course_offerings`、`system_settings`。
+- 管理员开课管理：`course_offerings`、`course`、`teacher`、`semesters`、`classrooms`、`course_selection`。
+- 学生选课：`system_settings`、`course_offerings`、`course`、`teacher`、`course_selection`、`grades`。
+- 学生课表：`course_selection`、`course_offerings`、`course`、`teacher`。
+- 学生成绩：`course_selection`、`grades`、`course_offerings`、`course`、`teacher`。
+- 教师课程：`course_offerings`、`course`、`course_selection`。
+- 教师成绩录入：`grades`、`course_selection`、`course_offerings`。
+- 统计分析：`sp_course_grade_statistics`、`grades`、`course_selection`、`course_offerings`、`course`、`teacher`、`student`。
 
 ## 12. 总结
 

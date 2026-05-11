@@ -119,7 +119,14 @@ function TimeSlotSelect({ value, onChange }: { value?: string; onChange?: (value
   );
 }
 
-function ResourcePanel({ config, onChanged }: { config: ResourceConfig; onChanged?: () => void | Promise<void> }) {
+interface ResourcePanelProps {
+  config: ResourceConfig;
+  onChanged?: () => void | Promise<void>;
+  selectionWindowOpen?: boolean | null;
+  onToggleSelectionWindow?: (isOpen: boolean) => void | Promise<void>;
+}
+
+function ResourcePanel({ config, onChanged, selectionWindowOpen, onToggleSelectionWindow }: ResourcePanelProps) {
   const [rows, setRows] = useState<AnyRecord[]>([]);
   const [keyword, setKeyword] = useState('');
   const [open, setOpen] = useState(false);
@@ -187,6 +194,12 @@ function ResourcePanel({ config, onChanged }: { config: ResourceConfig; onChange
     await reloadAfterChange();
   };
 
+  const toggleCourseSelectionWindow = async () => {
+    const nextOpen = !selectionWindowOpen;
+    await onToggleSelectionWindow?.(nextOpen);
+  };
+  const selectionWindowKnown = selectionWindowOpen !== null;
+
   const canEdit = config.key !== 'semesters';
   const canRemove = config.key !== 'semesters';
   const columns: ColumnsType<AnyRecord> = [
@@ -249,6 +262,20 @@ function ResourcePanel({ config, onChanged }: { config: ResourceConfig; onChange
       <div className="toolbar">
         <Typography.Title level={4}>{config.title}</Typography.Title>
         <Space wrap>
+          {config.key === 'semesters' && (
+            <>
+              <Tag color={selectionWindowOpen ? 'green' : selectionWindowKnown ? 'red' : 'default'}>
+                {selectionWindowKnown ? (selectionWindowOpen ? '选课开放中' : '选课已关闭') : '读取选课状态'}
+              </Tag>
+              <Button
+                danger={!!selectionWindowOpen}
+                disabled={!selectionWindowKnown}
+                onClick={toggleCourseSelectionWindow}
+              >
+                {selectionWindowOpen ? '关闭选课' : '开启选课'}
+              </Button>
+            </>
+          )}
           <Input.Search
             allowClear
             placeholder={`搜索${config.title}`}
@@ -420,20 +447,23 @@ export default function AdminDashboard() {
   const [teachers, setTeachers] = useState<AnyRecord[]>([]);
   const [semesters, setSemesters] = useState<AnyRecord[]>([]);
   const [classrooms, setClassrooms] = useState<AnyRecord[]>([]);
+  const [selectionWindowOpen, setSelectionWindowOpen] = useState<boolean | null>(null);
 
   const loadOptions = async () => {
-    const [deptData, courseData, teacherData, semesterData, classroomData] = await Promise.all([
+    const [deptData, courseData, teacherData, semesterData, classroomData, selectionWindowData] = await Promise.all([
       request.get<AnyRecord[]>('/admin/departments'),
       request.get<AnyRecord[]>('/admin/courses'),
       request.get<AnyRecord[]>('/admin/teachers'),
       request.get<AnyRecord[]>('/admin/semesters'),
-      request.get<AnyRecord[]>('/admin/classrooms')
+      request.get<AnyRecord[]>('/admin/classrooms'),
+      request.get<AnyRecord>('/admin/course-selection-window')
     ]);
     setDepartments(deptData);
     setCourses(courseData);
     setTeachers(teacherData);
     setSemesters(semesterData);
     setClassrooms(classroomData);
+    setSelectionWindowOpen(Boolean(selectionWindowData.is_open));
   };
 
   useEffect(() => {
@@ -445,10 +475,16 @@ export default function AdminDashboard() {
   const teacherOptions = teachers.map((item) => ({ label: `${item.staff_id} ${item.name}`, value: item.staff_id }));
   const semesterOptions = semesters.map((item) => ({ label: item.semester_name, value: item.semester_id }));
   const classroomOptions = classrooms.map((item) => ({
-    label: `${item.classroom_id}（${item.capacity}人）`,
-    value: item.classroom_id,
+    label: `${item.classroom}（${item.capacity}人）`,
+    value: item.classroom,
     capacity: Number(item.capacity)
   }));
+
+  const toggleCourseSelectionWindow = async (isOpen: boolean) => {
+    const data = await request.put<AnyRecord>('/admin/course-selection-window', { is_open: isOpen });
+    setSelectionWindowOpen(Boolean(data.is_open));
+    message.success(isOpen ? '已开启选课' : '已关闭选课');
+  };
 
   const resources = useMemo<ResourceConfig[]>(
     () => [
@@ -571,7 +607,14 @@ export default function AdminDashboard() {
         ...resources.map((resource) => ({
           key: resource.key,
           label: resource.title,
-          children: <ResourcePanel config={resource} onChanged={loadOptions} />
+          children: (
+            <ResourcePanel
+              config={resource}
+              onChanged={loadOptions}
+              selectionWindowOpen={selectionWindowOpen}
+              onToggleSelectionWindow={toggleCourseSelectionWindow}
+            />
+          )
         })),
         {
           key: 'statistics',

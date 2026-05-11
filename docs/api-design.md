@@ -38,17 +38,20 @@
 - `GET/POST /api/admin/semesters`
 - `PUT/DELETE /api/admin/semesters/:id`
 - `PUT /api/admin/semesters/:id/current`
+- `GET /api/admin/course-selection-window`
+- `PUT /api/admin/course-selection-window`，提交 `is_open` 控制全局选课开关
 - `GET/POST /api/admin/course-offerings`
 - `PUT/DELETE /api/admin/course-offerings/:id`
 - `GET /api/admin/departments`
-- `GET /api/admin/classrooms`
+- `GET /api/admin/classrooms`，返回 `classroom` 展示值以及 `building_no`、`room_no`、`capacity`
 
 ## 学生
 
 - `GET /api/student/semesters`
-- `GET /api/student/available-courses`，支持 `keyword`、`hasCapacity`、`onlyUnselected` 查询，并返回 `is_selected`、`selection_id`
-- `POST /api/student/select-course`
-- `DELETE /api/student/drop-course/:selectionId`
+- `GET /api/student/course-selection-window`
+- `GET /api/student/available-courses`，支持 `keyword`、`hasCapacity`、`onlyUnselected` 查询，并返回 `is_selected`、`selection_id`；选课关闭时返回空列表
+- `POST /api/student/select-course`，选课关闭时拒绝
+- `DELETE /api/student/drop-course/:selectionId`，选课关闭时拒绝
 - `GET /api/student/my-courses`
 - `GET /api/student/timetable`
 - `GET /api/student/my-grades`

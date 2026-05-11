@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import type { Request, Response } from 'express';
 import type { RowDataPacket } from 'mysql2';
-import { execute, query } from '../db/mysql';
+import { query } from '../db/mysql';
 import { fail, success } from '../utils/response';
 import type { AuthenticatedRequest, UserRole } from '../types/auth';
 
@@ -36,21 +36,58 @@ export async function login(req: Request, res: Response) {
 
   const users = await query<UserRow[]>(
     `SELECT
-       u.user_id,
-       u.username,
-       u.password_hash,
-       u.role,
-       COALESCE(ap.display_name, s.name, t.name, u.username) AS display_name,
-       u.student_id,
-       u.staff_id,
-       u.status
-     FROM users AS u
-     LEFT JOIN admin_profiles AS ap ON ap.user_id = u.user_id
-     LEFT JOIN student AS s ON s.student_id = u.student_id
-     LEFT JOIN teacher AS t ON t.staff_id = u.staff_id
-     WHERE u.username = ?
+       account_rows.user_id,
+       account_rows.username,
+       account_rows.password_hash,
+       account_rows.role,
+       account_rows.display_name,
+       account_rows.student_id,
+       account_rows.staff_id,
+       account_rows.status
+     FROM (
+       SELECT
+         u.user_id,
+         aa.username,
+         u.password_hash,
+         'admin' AS role,
+         aa.display_name,
+         NULL AS student_id,
+         NULL AS staff_id,
+         u.status
+       FROM admin_accounts AS aa
+       JOIN users AS u ON u.user_id = aa.user_id
+       WHERE aa.username = ?
+       UNION ALL
+       SELECT
+         u.user_id,
+         sa.student_id AS username,
+         u.password_hash,
+         'student' AS role,
+         s.name AS display_name,
+         sa.student_id,
+         NULL AS staff_id,
+         u.status
+       FROM student_accounts AS sa
+       JOIN users AS u ON u.user_id = sa.user_id
+       JOIN student AS s ON s.student_id = sa.student_id
+       WHERE sa.student_id = ?
+       UNION ALL
+       SELECT
+         u.user_id,
+         ta.staff_id AS username,
+         u.password_hash,
+         'teacher' AS role,
+         t.name AS display_name,
+         NULL AS student_id,
+         ta.staff_id,
+         u.status
+       FROM teacher_accounts AS ta
+       JOIN users AS u ON u.user_id = ta.user_id
+       JOIN teacher AS t ON t.staff_id = ta.staff_id
+       WHERE ta.staff_id = ?
+     ) AS account_rows
      LIMIT 1`,
-    [username]
+    [username, username, username]
   );
   const user = users[0];
 
@@ -65,7 +102,6 @@ export async function login(req: Request, res: Response) {
 
   const payload = toPayload(user);
   const token = jwt.sign(payload, process.env.JWT_SECRET || 'dev_secret', { expiresIn: '8h' });
-  await execute('UPDATE users SET last_login_at = NOW() WHERE user_id = ?', [user.user_id]);
 
   return success(res, { token, user: payload });
 }
