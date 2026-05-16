@@ -29,18 +29,25 @@ const initialFilters = {
 
 const weekdays = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'];
 const periods = ['1-2', '3-4', '5-6', '7-8', '9-10', '11-12'];
+const weekOptions = Array.from({ length: 16 }, (_, index) => ({
+  label: `第 ${index + 1} 周`,
+  value: index + 1
+}));
 
 export default function StudentDashboard() {
   const [activeTab, setActiveTab] = useState('available');
   const [semesters, setSemesters] = useState<AnyRecord[]>([]);
   const [availableRows, setAvailableRows] = useState<AnyRecord[]>([]);
   const [courseRows, setCourseRows] = useState<AnyRecord[]>([]);
+  const [timetableRows, setTimetableRows] = useState<AnyRecord[]>([]);
   const [gradeRows, setGradeRows] = useState<AnyRecord[]>([]);
   const [currentSemesterId, setCurrentSemesterId] = useState<string>();
   const [courseSemester, setCourseSemester] = useState<string>();
+  const [courseWeek, setCourseWeek] = useState(1);
   const [gradeSemester, setGradeSemester] = useState<string>();
   const [filters, setFilters] = useState(initialFilters);
   const [selectionWindowOpen, setSelectionWindowOpen] = useState<boolean | null>(null);
+  const [selectionEligibility, setSelectionEligibility] = useState<AnyRecord | null>(null);
 
   const loadSemesters = async () => {
     const data = await request.get<AnyRecord[]>('/student/semesters');
@@ -53,21 +60,27 @@ export default function StudentDashboard() {
   };
 
   const loadAvailable = async (nextFilters = filters) => {
-    const data = await request.get<AnyRecord[]>('/student/available-courses', {
+    const data = await request.get<AnyRecord[] | AnyRecord>('/student/available-courses', {
       params: {
         keyword: nextFilters.keyword || undefined,
         hasCapacity: nextFilters.hasCapacity || undefined,
         onlyUnselected: nextFilters.onlyUnselected || undefined
       }
     });
-    setAvailableRows(data);
+    if (Array.isArray(data)) {
+      setAvailableRows(data);
+    } else {
+      setAvailableRows(data.courses || []);
+      setSelectionEligibility(data.eligibility || null);
+    }
   };
 
   const loadSelectionWindow = async () => {
     const data = await request.get<AnyRecord>('/student/course-selection-window');
     const isOpen = Boolean(data.is_open);
     setSelectionWindowOpen(isOpen);
-    if (!isOpen) setAvailableRows([]);
+    setSelectionEligibility(data);
+    if (!isOpen || data.can_select_course === false) setAvailableRows([]);
     return isOpen;
   };
 
@@ -76,6 +89,13 @@ export default function StudentDashboard() {
       params: { semester }
     });
     setCourseRows(data);
+  };
+
+  const loadTimetable = async (semester = courseSemester || currentSemesterId, week = courseWeek) => {
+    const data = await request.get<AnyRecord[]>('/student/timetable', {
+      params: { semester, week }
+    });
+    setTimetableRows(data);
   };
 
   const loadGrades = async () => {
@@ -88,6 +108,7 @@ export default function StudentDashboard() {
     await Promise.all([
       isSelectionOpen ? loadAvailable() : Promise.resolve(),
       loadCourses(courseSemester || current),
+      loadTimetable(courseSemester || current, courseWeek),
       loadGrades()
     ]);
   };
@@ -110,7 +131,12 @@ export default function StudentDashboard() {
 
   const changeCourseSemester = async (semester: string) => {
     setCourseSemester(semester);
-    await loadCourses(semester);
+    await Promise.all([loadCourses(semester), loadTimetable(semester, courseWeek)]);
+  };
+
+  const changeCourseWeek = async (week: number) => {
+    setCourseWeek(week);
+    await loadTimetable(courseSemester || currentSemesterId, week);
   };
 
   const dropCourse = async (selectionId: number) => {
@@ -130,6 +156,10 @@ export default function StudentDashboard() {
       await loadAvailable();
     }
   };
+
+  const selectionBlockedReason = selectionEligibility?.can_select_course === false
+    ? selectionEligibility.reason || '当前学籍状态不能参与选课'
+    : null;
 
   const availableColumns: ColumnsType<AnyRecord> = [
     { title: '学期', dataIndex: 'semester' },
@@ -162,10 +192,28 @@ export default function StudentDashboard() {
           if (record.score !== null && record.score !== undefined) {
             return <Button disabled>已出成绩</Button>;
           }
+          if (selectionBlockedReason) {
+            return (
+              <Tooltip title={selectionBlockedReason}>
+                <span>
+                  <Button danger disabled icon={<DeleteOutlined />}>退课</Button>
+                </span>
+              </Tooltip>
+            );
+          }
           return (
             <Popconfirm title="确认退选？" onConfirm={() => dropCourse(Number(record.selection_id))}>
               <Button danger icon={<DeleteOutlined />}>退选</Button>
             </Popconfirm>
+          );
+        }
+        if (selectionBlockedReason) {
+          return (
+            <Tooltip title={selectionBlockedReason}>
+              <span>
+                <Button disabled>不可选课</Button>
+              </span>
+            </Tooltip>
           );
         }
         if (record.status !== 'open') {
@@ -215,6 +263,15 @@ export default function StudentDashboard() {
       render: (_, record) => {
         if (record.score !== null && record.score !== undefined) {
           return <Button disabled>已出成绩</Button>;
+        }
+        if (selectionBlockedReason) {
+          return (
+            <Tooltip title={selectionBlockedReason}>
+              <span>
+                <Button danger disabled icon={<DeleteOutlined />}>退课</Button>
+              </span>
+            </Tooltip>
+          );
         }
         if (!selectionWindowOpen) {
           return (
@@ -282,7 +339,7 @@ export default function StudentDashboard() {
     ? '已出成绩学分 / 全部总学分'
     : '已出成绩学分 / 本学期总学分';
   const creditSummary = `${finishedCredits.toFixed(1)} / ${totalCredits.toFixed(1)}`;
-  const timetable = useMemo(() => buildTimetable(courseRows), [courseRows]);
+  const timetable = useMemo(() => buildTimetable(timetableRows), [timetableRows]);
   const gpaTrend = useMemo(() => buildGpaTrend(gradeRows), [gradeRows]);
 
   return (
@@ -301,6 +358,13 @@ export default function StudentDashboard() {
               </div>
               {selectionWindowOpen === null ? (
                 <Alert type="info" showIcon message="正在读取选课状态" />
+              ) : selectionBlockedReason ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message={selectionBlockedReason}
+                  description="课表、成绩和信箱仍可正常查看。"
+                />
               ) : selectionWindowOpen ? (
                 <>
                   <Space wrap className="course-filter-bar">
@@ -349,7 +413,7 @@ export default function StudentDashboard() {
             <Space direction="vertical" size="large" style={{ width: '100%' }}>
               <div className="page-card">
                 <div className="toolbar">
-                  <Typography.Title level={4}>当前学期课程表</Typography.Title>
+                  <Typography.Title level={4}>周课程表</Typography.Title>
                   <Space wrap>
                     <Select
                       style={{ minWidth: 180 }}
@@ -357,7 +421,13 @@ export default function StudentDashboard() {
                       options={semesterOptions}
                       onChange={changeCourseSemester}
                     />
-                    <Button icon={<ReloadOutlined />} onClick={() => loadCourses()} />
+                    <Select
+                      style={{ width: 120 }}
+                      value={courseWeek}
+                      options={weekOptions}
+                      onChange={changeCourseWeek}
+                    />
+                    <Button icon={<ReloadOutlined />} onClick={() => loadTimetable()} />
                   </Space>
                 </div>
                 <div className="schedule-table-wrap">
@@ -378,6 +448,9 @@ export default function StudentDashboard() {
                                 <div className="schedule-course" key={course.selection_id}>
                                   <strong>{course.course_name}</strong>
                                   <span>{course.teacher_name}</span>
+                                  {Number(course.is_substituted) === 1 && (
+                                    <Tag color="orange">代课：原教师 {course.original_teacher_name}</Tag>
+                                  )}
                                   <span>{course.classroom || '-'}</span>
                                 </div>
                               ))}

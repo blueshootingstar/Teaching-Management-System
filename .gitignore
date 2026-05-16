@@ -26,3 +26,5 @@ yarn-error.log*
 Thumbs.db
 .vscode/
 .idea/
+
+.start-dev.bat

@@ -6,6 +6,7 @@ import adminRoutes from './routes/admin.routes';
 import studentRoutes from './routes/student.routes';
 import teacherRoutes from './routes/teacher.routes';
 import statisticsRoutes from './routes/statistics.routes';
+import mailboxRoutes from './routes/mailbox.routes';
 import { fail } from './utils/response';
 
 dotenv.config();
@@ -25,6 +26,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/student', studentRoutes);
 app.use('/api/teacher', teacherRoutes);
 app.use('/api/statistics', statisticsRoutes);
+app.use('/api/mailbox', mailboxRoutes);
 
 app.use((_req, res) => fail(res, '接口不存在', 404));
 

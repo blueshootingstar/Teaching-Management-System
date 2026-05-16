@@ -9,9 +9,15 @@ const router = Router();
 router.use(authMiddleware, requireRole('admin'));
 
 router.get('/departments', asyncHandler(admin.listDepartments));
+router.get('/student-statuses', asyncHandler(admin.listStudentStatuses));
+router.get('/professional-ranks', asyncHandler(admin.listProfessionalRanks));
+router.get('/course-hour-options', asyncHandler(admin.listCourseHourOptions));
 router.get('/classrooms', asyncHandler(admin.listClassrooms));
 router.get('/course-selection-window', asyncHandler(admin.getCourseSelectionWindow));
 router.put('/course-selection-window', asyncHandler(admin.updateCourseSelectionWindow));
+router.get('/notifications', asyncHandler(admin.listNotifications));
+router.post('/notifications', asyncHandler(admin.sendNotification));
+router.delete('/notifications/:mailItemId', asyncHandler(admin.deleteNotification));
 
 router.get('/students', asyncHandler(admin.listStudents));
 router.post('/students', asyncHandler(admin.createStudent));

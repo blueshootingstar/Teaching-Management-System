@@ -105,6 +105,79 @@ body {
   margin-bottom: 16px;
 }
 
+.statistics-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.statistics-hero,
+.stats-section {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.statistics-hero,
+.stats-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.stats-section-header {
+  margin-bottom: 16px;
+}
+
+.stats-grid-compact {
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
+  margin-bottom: 0;
+}
+
+.stat-tile {
+  min-height: 86px;
+  padding: 14px 16px;
+  background: #f9fafb;
+  border: 1px solid #eef0f4;
+  border-radius: 8px;
+}
+
+.statistics-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(360px, 0.65fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1180px) {
+  .stats-grid-compact {
+    grid-template-columns: repeat(3, minmax(140px, 1fr));
+  }
+
+  .statistics-split {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .statistics-hero,
+  .stats-section-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .stats-section-header .ant-select,
+  .statistics-hero .ant-btn {
+    width: 100%;
+  }
+
+  .stats-grid-compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .course-filter-bar {
   width: 100%;
   margin-bottom: 16px;
@@ -202,6 +275,10 @@ body {
   min-width: 4px;
   background: #1677ff;
   border-radius: 6px;
+}
+
+.mailbox-unread {
+  background: #f6fbff;
 }
 
 @media (max-width: 700px) {

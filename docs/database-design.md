@@ -45,6 +45,7 @@ department 1--N course
 
 semesters 1--N course_offerings
 course    1--N course_offerings
+course_hour_options 1--N course
 teacher   1--N course_offerings
 classrooms 1--N course_offerings
 
@@ -58,6 +59,13 @@ users 1--0/1 teacher_accounts
 student_accounts N--1 student
 teacher_accounts N--1 teacher
 system_settings 保存全局系统开关
+
+users 1--N mail_items
+mail_items 1--1 notification_messages
+mail_items 1--N mail_recipients
+mail_items 1--1 substitution_requests
+course_offerings 1--N substitution_requests
+teacher 1--N substitution_requests
 ```
 
 其中 `course_offerings` 表表示“开课记录”。一个开课记录表示某门课程在某个学期由某位教师授课，包含上课时间、教室、容量和开放状态。
@@ -98,12 +106,13 @@ system_settings 保存全局系统开关
 - `native_place`：籍贯。
 - `mobile_phone`：联系电话。
 - `dept_id`：所属院系，外键。
-- `status`：学籍状态，默认 `正常`。
+- `status_code`：学籍状态码，外键，默认 `normal`。
 
 约束与索引：
 
 - 主键：`student_id`。
 - 外键：`dept_id` 引用 `department.dept_id`。
+- 外键：`status_code` 引用 `student_statuses.status_code`。
 - 索引：`dept_id, name`，便于按院系和姓名查询。
 
 系统使用：
@@ -112,8 +121,21 @@ system_settings 保存全局系统开关
 - 登录账号通过 `student_accounts` 绑定学生身份。
 - 学生选课、课表、成绩均以 `student_id` 作为学生身份。
 - 教师查看学生名单时读取学生姓名和联系方式。
+- 学生状态下拉展示 `student_statuses.status_name`，选课资格读取 `student_statuses.can_select_course`。
 
-设计说明：学生基础信息和登录账号分开。`student` 保存业务实体，`users` 保存认证凭证，`student_accounts` 保存学生账号绑定关系，避免把登录账号和学生资料混在一张表里。
+设计说明：学生基础信息和登录账号分开。`student` 只保存状态码，不重复保存中文状态名或是否可选课；`正常`、`休学`、`毕业` 及其选课资格由 `student_statuses` 字典表维护。休学和毕业学生可以登录并查看历史课表、成绩，但不能选课或退课。
+
+### 4.2.1 `student_statuses` 学生状态字典表
+
+作用：定义学生状态名称和该状态是否允许参与选课。
+
+关键字段：
+
+- `status_code`：状态码，主键，例如 `normal`。
+- `status_name`：状态名称，例如 `正常`。
+- `can_select_course`：是否允许选课，`1` 表示允许，`0` 表示不允许。
+
+设计说明：`can_select_course` 是状态字典自身的业务事实，不放入 `student` 表，避免同一状态下多个学生重复保存相同选课资格。
 
 ### 4.3 `teacher` 教师表
 
@@ -125,7 +147,7 @@ system_settings 保存全局系统开关
 - `name`：教师姓名。
 - `sex`：性别。
 - `date_of_birth`：出生日期。
-- `professional_ranks`：职称。
+- `professional_rank_id`：职称 ID，外键。
 - `salary`：薪资。
 - `dept_id`：所属院系，外键。
 
@@ -133,16 +155,29 @@ system_settings 保存全局系统开关
 
 - 主键：`staff_id`。
 - 外键：`dept_id` 引用 `department.dept_id`。
+- 外键：`professional_rank_id` 引用 `professional_ranks.rank_id`。
 - 索引：`dept_id`。
 
 系统使用：
 
 - 管理员教师管理页面进行增删改查。
+- 管理员教师表单通过职称下拉选择 `professional_rank_id`。
 - 开课管理通过教师下拉选择 `staff_id`。
 - 教师登录后通过 `teacher_accounts.staff_id` 绑定到教师身份。
 - 教师端只展示该教师自己的授课课程和学生名单。
 
-设计说明：教师删除前需要检查是否已有开课记录。若已有开课记录，后端拒绝删除，前端禁用删除按钮并提示原因。
+设计说明：教师删除前需要检查是否已有开课记录。若已有开课记录，后端拒绝删除，前端禁用删除按钮并提示原因。教师表不保存自由文本职称，展示时通过 `professional_ranks` 关联得到职称名称。
+
+### 4.3.1 `professional_ranks` 职称字典表
+
+作用：保存教师职称选项。
+
+关键字段：
+
+- `rank_id`：职称 ID，自增主键。
+- `rank_name`：职称名称，例如 `教授`、`副教授`、`讲师`。
+
+设计说明：职称是可复用字典事实，教师表只引用 `rank_id`，避免同一个职称名称在多名教师记录中重复维护。
 
 ### 4.4 `course` 课程表
 
@@ -153,23 +188,42 @@ system_settings 保存全局系统开关
 - `course_id`：课程号，主键，例如 `08305002`。
 - `course_name`：课程名称，例如 `数据库原理`。
 - `credit`：学分。
-- `credit_hours`：学时。
+- `credit_hours`：学时，外键，必须来自固定学时选项。
 - `dept_id`：开课院系，外键。
 
 约束与索引：
 
 - 主键：`course_id`。
 - 外键：`dept_id` 引用 `department.dept_id`。
+- 外键：`credit_hours` 引用 `course_hour_options.credit_hours`。
 - 索引：`dept_id`、`course_name`。
 
 系统使用：
 
 - 管理员课程管理页面维护课程基础信息。
 - 开课管理从课程表中选择课程。
-- 学生可选课程、课表、成绩页面展示课程名、学分等信息。
+- 学生可选课程、课表、成绩页面展示课程名、学分、学时和上课周数等信息。
 - 统计分析按课程汇总平均分和排名。
 
-设计说明：`course` 只描述课程本身。某课程在哪个学期、哪个老师、哪个教室上课，由 `course_offerings` 表描述。
+设计说明：`course` 只描述课程本身。某课程在哪个学期、哪个老师、哪个教室上课，由 `course_offerings` 表描述。课程只保存 `credit_hours`，对应的 `required_weeks` 由学时字典表决定，不在课程表重复保存。
+
+### 4.4.1 `course_hour_options` 学时字典表
+
+作用：保存课程允许选择的固定学时，以及该学时对应的上课周数。
+
+关键字段：
+
+- `credit_hours`：学时，主键，例如 `32`。
+- `required_weeks`：需要上课的周数，例如 `8`。
+
+初始化选项：
+
+- `16` 学时对应 `4` 周。
+- `32` 学时对应 `8` 周。
+- `48` 学时对应 `12` 周。
+- `64` 学时对应 `16` 周。
+
+设计说明：`required_weeks` 是学时选项自身的业务事实，而不是某一门课程的冗余字段。课程表通过 `credit_hours` 引用该字典，课表和代课申请按 JOIN 得到上课周数。
 
 ### 4.5 `semesters` 学期表
 
@@ -387,11 +441,34 @@ system_settings 保存全局系统开关
 
 - 登录接口先按输入账号匹配管理员用户名、学生学号或教师教工号。
 - 使用 `users.password_hash` 校验密码。
+- 管理员新增学生或教师时可以填写初始密码；不填则使用默认密码 `123456`。
+- 管理员编辑学生或教师时可以填写重置密码；不填则保持原密码。
+- 登录用户可以通过修改密码接口校验旧密码后更新自己的密码。
 - 登录成功后根据命中的账号绑定表推导角色，并把角色放入 JWT。
 - 学生和教师显示名分别来自 `student.name` 和 `teacher.name`，管理员显示名来自 `admin_accounts.display_name`。
 - 前端根据 JWT 中的角色进入管理员、教师或学生界面。
 
-设计说明：`users` 不再保存 `username`、`role`、`student_id`、`staff_id`。学生和教师的登录账号本来就是学号/教工号，角色也可由账号绑定表推出，因此拆表后避免了重复表达同一个身份事实。
+设计说明：`users` 不再保存 `username`、`role`、`student_id`、`staff_id`。学生和教师的登录账号本来就是学号/教工号，角色也可由账号绑定表推出，因此拆表后避免了重复表达同一个身份事实。数据库只保存 bcrypt 哈希，不保存密码明文，也不保存本轮页面没有展示的密码修改时间。
+
+### 4.12 信箱与代课表
+
+作用：支持教师、学生接收信箱消息，并支持教师对某一学期第 1-16 周的课程申请代课。
+
+关键表：
+
+- `mail_items(mail_item_id, sender_user_id, created_at)`：信箱事项主表，只保存发送者和创建时间。
+- `notification_messages(mail_item_id, title, content)`：管理员通知正文。
+- `mail_recipients(recipient_id, mail_item_id, recipient_user_id, read_at)`：每个收件人的收件和已读状态。
+- `substitution_requests(mail_item_id, offering_id, week_no, substitute_staff_id, status, reason)`：代课申请事实。
+
+系统使用：
+
+- 管理员发送通知时写入一条 `mail_items` 和一条 `notification_messages`，再为目标教师/学生写入 `mail_recipients`。
+- 管理员右上角通知入口可以查看全部通知历史；任意管理员删除通知时删除 `mail_items`，通知正文和所有收件记录通过外键级联删除。
+- 教师申请代课时写入一条 `mail_items`、一条 `substitution_requests`，并给目标教师写入 `mail_recipients`。
+- 教师同意代课后，教师端和学生端按 `offering_id + week_no` 查询已同意代课申请，动态计算该周实际授课教师。
+
+设计说明：信箱不在基础表中保存 `message_type`、课程名、教师名、教室展示名、学期或上课时间。消息类型由是否存在 `notification_messages` 或 `substitution_requests` 推导；课程、教师、学期、时间、教室均通过外键关联查询得到。`recipient_count`、`read_count`、`item_type`、通知发送人名称等都是查询聚合或 JOIN 展示值，不落入基础表。`read_at` 是收件人的已读行为事实，`created_at` 用于信箱排序，二者都是系统实际使用字段。
 
 ## 5. 触发器设计
 
@@ -474,6 +551,7 @@ system_settings 保存全局系统开关
 
 - 开课记录必须存在。
 - 全局选课开关 `course_selection_open` 必须为 `1`。
+- 学生状态必须允许选课：`student.status_code -> student_statuses.can_select_course = 1`。
 - `course_offerings.status` 必须为 `open`。
 - 学生不能重复选择同一开课。
 - 当前已选人数不能超过 `course_offerings.capacity`。
@@ -485,6 +563,7 @@ system_settings 保存全局系统开关
 
 - 选课记录必须属于当前学生。
 - 全局选课开关 `course_selection_open` 必须为 `1`。
+- 学生状态必须允许选课；休学和毕业学生不能退课，但可以查看历史课程和成绩。
 - 若成绩已录入，则不能退课。
 - 未录成绩的选课记录可以删除。
 
@@ -540,6 +619,15 @@ GPA 不直接存入数据库，由前端基于成绩和学分计算。规则为�
 
 前端对不可删除记录禁用删除按钮，并通过悬浮提示显示原因。
 
+### 8.7 信箱和代课规则
+
+- 教学周固定为第 1 到第 16 周。
+- 每门课程实际显示和可申请代课的周次不能超过 `course.credit_hours -> course_hour_options.required_weeks`。
+- 同一开课记录同一教学周只能存在一个待处理或已同意的代课申请。
+- 目标教师在该学期、该教学周、同一上课时间已有授课或已同意代课时，不能接收新的代课申请。
+- 已同意代课只影响对应教学周的课表显示，不改变 `course_offerings.staff_id`。
+- 学生周课表按已同意的代课申请显示实际授课教师。
+
 ## 9. 第三范式与兼容说明
 
 当前最终版基础表按第三范式整理：
@@ -549,12 +637,18 @@ GPA 不直接存入数据库，由前端基于成绩和学分计算。规则为�
 - `course_offerings` 通过 `classroom_building_no, classroom_room_no` 引用教室，不保存可由教室主键拼出的 `classroom_id`。
 - `classrooms` 不保存 `floor_no`，避免 `room_no -> floor_no` 带来的传递依赖。
 - `system_settings` 只保存系统级设置，选课总开关不放入学期、课程、开课或选课表。
+- `student` 只保存 `status_code`，状态中文名和是否允许选课由 `student_statuses` 决定。
+- `teacher` 只保存 `professional_rank_id`，职称名称由 `professional_ranks` 决定。
+- `course` 只保存 `credit_hours`，上课周数由 `course_hour_options.required_weeks` 决定。
 - `grades` 只保存平时成绩和考试成绩，不保存可推导的总评成绩和成绩状态。
 - `v_grades` 视图统一计算 `score` 和 `grade_status`，保证前后端接口仍能直接读取这些展示字段。
 - `users` 只保存认证凭证和账号状态，角色和绑定身份由 `admin_accounts`、`student_accounts`、`teacher_accounts` 推导。
 - `admin_accounts` 只保存管理员账号特有的登录名和显示名。
+- `substitution_requests` 不保存发起教师、学期、课程名、教师名、上课时间、教室展示值或周数上限；发起教师由 `offering_id -> course_offerings.staff_id` 推导，周数上限由 `offering_id -> course -> course_hour_options` 推导，其他字段由开课和教师外键关联得到。
+- `mail_items` 不保存消息类型，通知和代课申请分别由 `notification_messages`、`substitution_requests` 子表表达。
+- `mail_recipients.read_at` 保存每个收件人的已读行为，不与消息正文混存。
 
-这些调整消除了成绩、教室编号、楼层、角色绑定和显示名的重复存储，避免同一事实在多个基础表中同步失败。
+这些调整消除了成绩、教室编号、楼层、角色绑定、显示名、学生状态名称、职称名称、课程上课周数和消息类型的重复存储，避免同一事实在多个基础表中同步失败。
 
 - `course_offerings` 的业务唯一键与 `offering_id`：
   - 业务唯一键 `semester_id, course_id, staff_id` 保证开课自然唯一。
@@ -571,15 +665,19 @@ GPA 不直接存入数据库，由前端基于成绩和学分计算。规则为�
 从 0 初始化脚本会插入以下测试数据：
 
 - 院系：5 个。
+- 学生状态：3 个。
+- 教师职称：3 个。
 - 学生：40 个。
 - 教师：10 个。
 - 课程：18 门。
 - 学期：6 个，当前学期为 `201402`。
+- 学时选项：4 个，分别为 `16/32/48/64` 学时，对应 `4/8/12/16` 周。
 - 教室：35 间，覆盖 A-G 楼。
 - 开课记录：75 条。
 - 选课记录：253 条。
 - 成绩记录：253 条，由触发器随选课记录自动生成。
 - 用户账号：51 个，包括管理员、学生和教师。
+- 初始信箱和代课申请：0 条，由系统运行时生成。
 
 默认测试密码均为 `123456`：
 
@@ -598,16 +696,19 @@ GPA 不直接存入数据库，由前端基于成绩和学分计算。规则为�
 
 ## 11. 与系统模块的对应关系
 
-- 管理员学生管理：`student`、`department`、`users`、`student_accounts`、`course_selection`、`grades`。
-- 管理员教师管理：`teacher`、`department`、`users`、`teacher_accounts`、`course_offerings`。
+- 管理员学生管理：`student`、`student_statuses`、`department`、`users`、`student_accounts`、`course_selection`、`grades`。
+- 管理员教师管理：`teacher`、`professional_ranks`、`department`、`users`、`teacher_accounts`、`course_offerings`。
 - 管理员课程管理：`course`、`department`、`course_offerings`、`course_selection`。
 - 管理员学期管理：`semesters`、`course_offerings`、`system_settings`。
 - 管理员开课管理：`course_offerings`、`course`、`teacher`、`semesters`、`classrooms`、`course_selection`。
-- 学生选课：`system_settings`、`course_offerings`、`course`、`teacher`、`course_selection`、`grades`。
+- 学生选课：`system_settings`、`student_statuses`、`course_offerings`、`course`、`teacher`、`course_selection`、`grades`。
 - 学生课表：`course_selection`、`course_offerings`、`course`、`teacher`。
 - 学生成绩：`course_selection`、`grades`、`course_offerings`、`course`、`teacher`。
-- 教师课程：`course_offerings`、`course`、`course_selection`。
+- 学生周课表：`course_selection`、`course_offerings`、`course`、`teacher`、`substitution_requests`。
+- 教师课程和周课表：`course_offerings`、`course`、`course_selection`、`substitution_requests`。
 - 教师成绩录入：`grades`、`course_selection`、`course_offerings`。
+- 教师代课申请：`substitution_requests`、`mail_items`、`mail_recipients`、`teacher_accounts`。
+- 信箱通知：`mail_items`、`notification_messages`、`mail_recipients`。
 - 统计分析：`sp_course_grade_statistics`、`grades`、`course_selection`、`course_offerings`、`course`、`teacher`、`student`。
 
 ## 12. 总结

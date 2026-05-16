@@ -24,6 +24,30 @@ function requireStudentId(req: AuthenticatedRequest, res: Response) {
   return studentId;
 }
 
+function normalizeWeek(value: unknown) {
+  const weekNo = Number(value);
+  return Number.isInteger(weekNo) && weekNo >= 1 && weekNo <= 16 ? weekNo : null;
+}
+
+async function getStudentSelectionEligibility(studentId: string) {
+  const rows = await query<RowDataPacket[]>(
+    `SELECT s.status_code, ss.status_name, ss.can_select_course
+     FROM student AS s
+     JOIN student_statuses AS ss ON ss.status_code = s.status_code
+     WHERE s.student_id = ?
+     LIMIT 1`,
+    [studentId]
+  );
+  const row = rows[0];
+  const canSelectCourse = Boolean(row?.can_select_course);
+  return {
+    status_code: row?.status_code || null,
+    status_name: row?.status_name || null,
+    can_select_course: canSelectCourse,
+    reason: canSelectCourse ? null : `当前学籍状态为${row?.status_name || '非正常'}，不能参与选课`
+  };
+}
+
 export async function semesters(req: AuthenticatedRequest, res: Response) {
   const studentId = requireStudentId(req, res);
   if (!studentId) return null;
@@ -45,19 +69,30 @@ export async function courseSelectionWindow(req: AuthenticatedRequest, res: Resp
   const studentId = requireStudentId(req, res);
   if (!studentId) return null;
 
-  const isOpen = await getCourseSelectionOpen();
-  return success(res, courseSelectionWindowPayload(isOpen));
+  const [isOpen, eligibility] = await Promise.all([
+    getCourseSelectionOpen(),
+    getStudentSelectionEligibility(studentId)
+  ]);
+  return success(res, {
+    ...courseSelectionWindowPayload(isOpen),
+    ...eligibility
+  });
 }
 
 export async function availableCourses(req: AuthenticatedRequest, res: Response) {
   const studentId = requireStudentId(req, res);
   if (!studentId) return null;
 
-  const isSelectionOpen = await getCourseSelectionOpen();
-  if (!isSelectionOpen) return success(res, []);
+  const [isSelectionOpen, eligibility] = await Promise.all([
+    getCourseSelectionOpen(),
+    getStudentSelectionEligibility(studentId)
+  ]);
+  if (!eligibility.can_select_course || !isSelectionOpen) {
+    return success(res, { courses: [], eligibility });
+  }
 
   const semester = String(req.query.semester || '').trim() || (await getCurrentSemester());
-  if (!semester) return success(res, []);
+  if (!semester) return success(res, { courses: [], eligibility });
   const keyword = String(req.query.keyword || '').trim();
   const hasCapacity = req.query.hasCapacity === 'true' || req.query.hasCapacity === '1';
   const onlyUnselected = req.query.onlyUnselected === 'true' || req.query.onlyUnselected === '1';
@@ -80,6 +115,7 @@ export async function availableCourses(req: AuthenticatedRequest, res: Response)
   const rows = await query<RowDataPacket[]>(
     `SELECT
        c.offering_id, c.semester_id AS semester, co.course_id, co.course_name, co.credit, co.credit_hours,
+       cho.required_weeks,
        c.staff_id, t.name AS teacher_name, c.class_time,
        CONCAT(c.classroom_building_no, c.classroom_room_no) AS classroom,
        c.capacity, c.status,
@@ -102,6 +138,7 @@ export async function availableCourses(req: AuthenticatedRequest, res: Response)
        END AS conflict_reason
       FROM course_offerings AS c
       JOIN course AS co ON co.course_id = c.course_id
+      JOIN course_hour_options AS cho ON cho.credit_hours = co.credit_hours
       JOIN teacher AS t ON t.staff_id = c.staff_id
      LEFT JOIN course_selection AS cs
        ON cs.offering_id = c.offering_id
@@ -127,7 +164,7 @@ export async function availableCourses(req: AuthenticatedRequest, res: Response)
       LEFT JOIN course AS time_course ON time_course.course_id = time_class.course_id
       LEFT JOIN teacher AS time_teacher ON time_teacher.staff_id = time_class.staff_id
       ${whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : ''}
-      GROUP BY c.offering_id, c.semester_id, co.course_id, co.course_name, co.credit, co.credit_hours,
+      GROUP BY c.offering_id, c.semester_id, co.course_id, co.course_name, co.credit, co.credit_hours, cho.required_weeks,
                c.staff_id, t.name, c.class_time, c.classroom_building_no, c.classroom_room_no, c.capacity, c.status
       ${havingParts.length > 0 ? `HAVING ${havingParts.join(' AND ')}` : ''}
       ORDER BY c.semester_id DESC, co.course_id, t.name`,
@@ -151,6 +188,20 @@ export async function selectCourse(req: AuthenticatedRequest, res: Response) {
     if (!isSelectionOpen) {
       await conn.rollback();
       return fail(res, '当前不在选课时间');
+    }
+
+    const [eligibilityRows] = await conn.query<RowDataPacket[]>(
+      `SELECT ss.status_name, ss.can_select_course
+       FROM student AS s
+       JOIN student_statuses AS ss ON ss.status_code = s.status_code
+       WHERE s.student_id = ?
+       LIMIT 1`,
+      [studentId]
+    );
+    const eligibility = eligibilityRows[0];
+    if (!eligibility?.can_select_course) {
+      await conn.rollback();
+      return fail(res, `当前学籍状态为${eligibility?.status_name || '非正常'}，不能参与选课`);
     }
 
     const [offerings] = await conn.query<RowDataPacket[]>(
@@ -244,6 +295,20 @@ export async function dropCourse(req: AuthenticatedRequest, res: Response) {
       return fail(res, '当前不在选课时间');
     }
 
+    const [eligibilityRows] = await conn.query<RowDataPacket[]>(
+      `SELECT ss.status_name, ss.can_select_course
+       FROM student AS s
+       JOIN student_statuses AS ss ON ss.status_code = s.status_code
+       WHERE s.student_id = ?
+       LIMIT 1`,
+      [studentId]
+    );
+    const eligibility = eligibilityRows[0];
+    if (!eligibility?.can_select_course) {
+      await conn.rollback();
+      return fail(res, `当前学籍状态为${eligibility?.status_name || '非正常'}，不能参与选课`);
+    }
+
     const [rows] = await conn.query<RowDataPacket[]>(
       `SELECT cs.selection_id, g.score
        FROM course_selection AS cs
@@ -280,12 +345,13 @@ export async function myCourses(req: AuthenticatedRequest, res: Response) {
   const rows = await query<RowDataPacket[]>(
     `SELECT
        cs.selection_id, c.offering_id, c.semester_id AS semester, co.course_id, co.course_name,
-       co.credit, c.staff_id, t.name AS teacher_name, c.class_time,
+       co.credit, co.credit_hours, cho.required_weeks, c.staff_id, t.name AS teacher_name, c.class_time,
        CONCAT(c.classroom_building_no, c.classroom_room_no) AS classroom,
        g.score
      FROM course_selection AS cs
      JOIN course_offerings AS c ON c.offering_id = cs.offering_id
      JOIN course AS co ON co.course_id = c.course_id
+     JOIN course_hour_options AS cho ON cho.credit_hours = co.credit_hours
      JOIN teacher AS t ON t.staff_id = c.staff_id
      LEFT JOIN v_grades AS g ON g.selection_id = cs.selection_id
      WHERE cs.student_id = ? AND c.semester_id = ?
@@ -296,7 +362,50 @@ export async function myCourses(req: AuthenticatedRequest, res: Response) {
 }
 
 export async function timetable(req: AuthenticatedRequest, res: Response) {
-  return myCourses(req, res);
+  const studentId = requireStudentId(req, res);
+  if (!studentId) return null;
+
+  const semester = String(req.query.semester || '').trim() || (await getCurrentSemester());
+  const weekNo = normalizeWeek(req.query.week || 1);
+  if (!semester) return success(res, []);
+  if (!weekNo) return fail(res, '教学周必须是 1 到 16 的整数');
+
+  const rows = await query<RowDataPacket[]>(
+    `SELECT
+       cs.selection_id,
+       c.offering_id,
+       c.semester_id AS semester,
+       co.course_id,
+       co.course_name,
+       co.credit,
+       co.credit_hours,
+       cho.required_weeks,
+       c.staff_id,
+       owner.name AS original_teacher_name,
+       accepted.substitute_staff_id,
+       substitute.name AS substitute_teacher_name,
+       CASE WHEN accepted.mail_item_id IS NULL THEN owner.name ELSE substitute.name END AS teacher_name,
+       CASE WHEN accepted.mail_item_id IS NULL THEN 0 ELSE 1 END AS is_substituted,
+       c.class_time,
+       CONCAT(c.classroom_building_no, c.classroom_room_no) AS classroom,
+       g.score
+     FROM course_selection AS cs
+     JOIN course_offerings AS c ON c.offering_id = cs.offering_id
+     JOIN course AS co ON co.course_id = c.course_id
+     JOIN course_hour_options AS cho ON cho.credit_hours = co.credit_hours
+     JOIN teacher AS owner ON owner.staff_id = c.staff_id
+     LEFT JOIN substitution_requests AS accepted
+       ON accepted.offering_id = c.offering_id
+      AND accepted.week_no = ?
+      AND accepted.status = 'accepted'
+     LEFT JOIN teacher AS substitute ON substitute.staff_id = accepted.substitute_staff_id
+     LEFT JOIN v_grades AS g ON g.selection_id = cs.selection_id
+     WHERE cs.student_id = ? AND c.semester_id = ?
+       AND ? <= cho.required_weeks
+     ORDER BY c.class_time, co.course_id`,
+    [weekNo, studentId, semester, weekNo]
+  );
+  return success(res, rows);
 }
 
 export async function myGrades(req: AuthenticatedRequest, res: Response) {

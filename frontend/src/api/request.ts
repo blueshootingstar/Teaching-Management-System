@@ -22,7 +22,9 @@ http.interceptors.response.use(
       return body.data;
     }
     message.error(body.message || '请求失败');
-    return Promise.reject(new Error(body.message || '请求失败'));
+    const error = new Error(body.message || '请求失败') as Error & { response?: { data: ApiResponse<any> } };
+    error.response = { data: body };
+    return Promise.reject(error);
   },
   (error) => {
     const msg = error.response?.data?.message || error.message || '网络错误';

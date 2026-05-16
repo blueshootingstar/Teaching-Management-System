@@ -3,13 +3,57 @@ import type { Request, Response } from 'express';
 import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { execute, getConnection, query } from '../db/mysql';
 import { courseSelectionWindowPayload, getCourseSelectionOpen, setCourseSelectionOpen } from '../services/systemSettings';
+import type { AuthenticatedRequest } from '../types/auth';
 import { fail, success } from '../utils/response';
 
 const DEFAULT_PASSWORD = '123456';
 const OFFERING_STATUS_VALUES = new Set(['open', 'closed']);
+const SEX_VALUES = new Set(['男', '女']);
+
+type FieldErrors = Record<string, string>;
 
 function toCount(value: unknown) {
   return Number(value || 0);
+}
+
+function failFieldErrors(res: Response, fieldErrors: FieldErrors) {
+  return fail(res, '表单校验失败', 400, { fieldErrors });
+}
+
+function cleanText(value: unknown) {
+  return String(value ?? '').trim();
+}
+
+function cleanOptionalPassword(value: unknown) {
+  const password = cleanText(value);
+  return password ? password : undefined;
+}
+
+function validDateString(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [yearText, monthText, dayText] = value.split('-');
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return false;
+  }
+  const today = new Date();
+  const todayUtc = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  return date.getTime() <= todayUtc;
+}
+
+async function existsInTable(table: string, column: string, value: unknown) {
+  const rows = await query<RowDataPacket[]>(
+    `SELECT 1 AS ok FROM ${table} WHERE ${column} = ? LIMIT 1`,
+    [value]
+  );
+  return rows.length > 0;
 }
 
 function studentDeleteReason(row: RowDataPacket) {
@@ -24,7 +68,12 @@ function studentDeleteReason(row: RowDataPacket) {
 
 function teacherDeleteReason(row: RowDataPacket) {
   const offeringCount = toCount(row.offering_count);
-  return offeringCount > 0 ? `已有${offeringCount}条开课记录，不能删除` : null;
+  const substitutionCount = toCount(row.substitution_count);
+  if (offeringCount === 0 && substitutionCount === 0) return null;
+  const parts = [];
+  if (offeringCount > 0) parts.push(`${offeringCount}条开课记录`);
+  if (substitutionCount > 0) parts.push(`${substitutionCount}条代课申请`);
+  return `已有${parts.join('、')}，不能删除`;
 }
 
 function courseDeleteReason(row: RowDataPacket) {
@@ -39,7 +88,12 @@ function courseDeleteReason(row: RowDataPacket) {
 
 function offeringDeleteReason(row: RowDataPacket) {
   const selectionCount = toCount(row.selection_count);
-  return selectionCount > 0 ? `已有${selectionCount}条选课记录，不能删除` : null;
+  const substitutionCount = toCount(row.substitution_count);
+  if (selectionCount === 0 && substitutionCount === 0) return null;
+  const parts = [];
+  if (selectionCount > 0) parts.push(`${selectionCount}条选课记录`);
+  if (substitutionCount > 0) parts.push(`${substitutionCount}条代课申请`);
+  return `已有${parts.join('、')}，不能删除`;
 }
 
 function addDeleteState(row: RowDataPacket, reason: string | null) {
@@ -89,6 +143,27 @@ function parseClassroom(value: unknown) {
   };
 }
 
+function courseOfferingDuplicateFieldErrors(error: unknown): FieldErrors | null {
+  const maybeMysqlError = error as { code?: string; message?: string };
+  if (maybeMysqlError?.code !== 'ER_DUP_ENTRY') return null;
+
+  const message = String(maybeMysqlError.message || '');
+  if (message.includes('uk_course_offerings_classroom_time')) {
+    return {
+      class_time: '该时间段教室已被占用',
+      classroom: '该教室在该时间已有课程'
+    };
+  }
+  if (message.includes('uk_course_offerings_business')) {
+    return {
+      course_id: '该学期该教师已开设这门课程',
+      staff_id: '该教师本学期已开设这门课程'
+    };
+  }
+
+  return null;
+}
+
 async function upsertUser(
   conn: PoolConnection,
   role: 'student' | 'teacher',
@@ -109,6 +184,12 @@ async function upsertUser(
   const existingUserId = existingRows[0]?.user_id;
   if (existingUserId) {
     await conn.execute('UPDATE users SET status = ? WHERE user_id = ?', ['active', existingUserId]);
+    if (password) {
+      await conn.execute(
+        'UPDATE users SET password_hash = ? WHERE user_id = ?',
+        [passwordHash, existingUserId]
+      );
+    }
     return;
   }
 
@@ -124,8 +205,178 @@ async function upsertUser(
   );
 }
 
+async function updateBoundUserPassword(
+  conn: PoolConnection,
+  role: 'student' | 'teacher',
+  bindId: string,
+  password: string | undefined
+) {
+  if (!password) return;
+  const accountTable = role === 'student' ? 'student_accounts' : 'teacher_accounts';
+  const bindColumn = role === 'student' ? 'student_id' : 'staff_id';
+  const passwordHash = await bcrypt.hash(password, 10);
+  await conn.execute(
+    `UPDATE users AS u
+     JOIN ${accountTable} AS account ON account.user_id = u.user_id
+     SET u.password_hash = ?
+     WHERE account.${bindColumn} = ?`,
+    [passwordHash, bindId]
+  );
+}
+
+async function validateStudentPayload(body: any, mode: 'create' | 'update', currentStudentId?: string) {
+  const payload = {
+    student_id: cleanText(body.student_id || currentStudentId),
+    name: cleanText(body.name),
+    sex: cleanText(body.sex),
+    date_of_birth: cleanText(body.date_of_birth),
+    native_place: cleanText(body.native_place),
+    mobile_phone: cleanText(body.mobile_phone),
+    dept_id: cleanText(body.dept_id),
+    status_code: cleanText(body.status_code || body.status || 'normal'),
+    password: cleanOptionalPassword(body.password)
+  };
+  const fieldErrors: FieldErrors = {};
+
+  if (!payload.student_id) fieldErrors.student_id = '请输入学号';
+  else if (!/^\d{4}$/.test(payload.student_id)) fieldErrors.student_id = '学号需为 4 位数字';
+  else if (mode === 'create' && await existsInTable('student', 'student_id', payload.student_id)) {
+    fieldErrors.student_id = '学号已存在';
+  }
+
+  if (!payload.name) fieldErrors.name = '请输入姓名';
+  if (!SEX_VALUES.has(payload.sex)) fieldErrors.sex = '请选择性别';
+  if (!payload.date_of_birth) fieldErrors.date_of_birth = '请选择出生日期';
+  else if (!validDateString(payload.date_of_birth)) fieldErrors.date_of_birth = '出生日期格式不正确';
+  else if (payload.date_of_birth > new Date().toISOString().slice(0, 10)) {
+    fieldErrors.date_of_birth = '出生日期不能晚于今天';
+  }
+  if (!payload.native_place) fieldErrors.native_place = '请输入籍贯';
+  if (!payload.mobile_phone) fieldErrors.mobile_phone = '请输入电话';
+  else if (!/^\d{5,20}$/.test(payload.mobile_phone)) {
+    fieldErrors.mobile_phone = '电话需为 5-20 位数字';
+  }
+  if (!payload.dept_id) fieldErrors.dept_id = '请选择院系';
+  else if (!await existsInTable('department', 'dept_id', payload.dept_id)) {
+    fieldErrors.dept_id = '院系不存在';
+  }
+  if (!payload.status_code) fieldErrors.status_code = '请选择状态';
+  else if (!await existsInTable('student_statuses', 'status_code', payload.status_code)) {
+    fieldErrors.status_code = '学生状态不存在';
+  }
+  if (payload.password && payload.password.length < 6) {
+    fieldErrors.password = '密码至少 6 位';
+  }
+
+  return { payload, fieldErrors };
+}
+
+async function validateTeacherPayload(body: any, mode: 'create' | 'update', currentStaffId?: string) {
+  const professionalRankId = Number(body.professional_rank_id || body.professionalRankId);
+  const salary = Number(body.salary);
+  const payload = {
+    staff_id: cleanText(body.staff_id || currentStaffId),
+    name: cleanText(body.name),
+    sex: cleanText(body.sex),
+    date_of_birth: cleanText(body.date_of_birth),
+    professional_rank_id: professionalRankId,
+    salary,
+    dept_id: cleanText(body.dept_id),
+    password: cleanOptionalPassword(body.password)
+  };
+  const fieldErrors: FieldErrors = {};
+
+  if (!payload.staff_id) fieldErrors.staff_id = '请输入教工号';
+  else if (!/^\d{4}$/.test(payload.staff_id)) fieldErrors.staff_id = '教工号需为 4 位数字';
+  else if (mode === 'create' && await existsInTable('teacher', 'staff_id', payload.staff_id)) {
+    fieldErrors.staff_id = '教工号已存在';
+  }
+
+  if (!payload.name) fieldErrors.name = '请输入姓名';
+  if (!SEX_VALUES.has(payload.sex)) fieldErrors.sex = '请选择性别';
+  if (!payload.date_of_birth) fieldErrors.date_of_birth = '请选择出生日期';
+  else if (!validDateString(payload.date_of_birth)) fieldErrors.date_of_birth = '出生日期格式不正确';
+  else if (payload.date_of_birth > new Date().toISOString().slice(0, 10)) {
+    fieldErrors.date_of_birth = '出生日期不能晚于今天';
+  }
+  if (!Number.isInteger(payload.professional_rank_id) || payload.professional_rank_id <= 0) {
+    fieldErrors.professional_rank_id = '请选择职称';
+  } else if (!await existsInTable('professional_ranks', 'rank_id', payload.professional_rank_id)) {
+    fieldErrors.professional_rank_id = '职称不存在';
+  }
+  if (!Number.isFinite(payload.salary) || payload.salary < 0) fieldErrors.salary = '薪资不能小于 0';
+  if (!payload.dept_id) fieldErrors.dept_id = '请选择院系';
+  else if (!await existsInTable('department', 'dept_id', payload.dept_id)) {
+    fieldErrors.dept_id = '院系不存在';
+  }
+  if (payload.password && payload.password.length < 6) {
+    fieldErrors.password = '密码至少 6 位';
+  }
+
+  return { payload, fieldErrors };
+}
+
+async function validateCoursePayload(body: any, mode: 'create' | 'update', currentCourseId?: string) {
+  const credit = Number(body.credit);
+  const creditHours = Number(body.credit_hours);
+  const payload = {
+    course_id: cleanText(body.course_id || currentCourseId),
+    course_name: cleanText(body.course_name),
+    credit,
+    credit_hours: creditHours,
+    dept_id: cleanText(body.dept_id)
+  };
+  const fieldErrors: FieldErrors = {};
+
+  if (!payload.course_id) fieldErrors.course_id = '请输入课程号';
+  else if (!/^\d{8}$/.test(payload.course_id)) fieldErrors.course_id = '课程号需为 8 位数字';
+  else if (mode === 'create' && await existsInTable('course', 'course_id', payload.course_id)) {
+    fieldErrors.course_id = '课程号已存在';
+  }
+  if (!payload.course_name) fieldErrors.course_name = '请输入课程名';
+  if (!Number.isFinite(payload.credit) || payload.credit <= 0) fieldErrors.credit = '学分必须大于 0';
+  if (!Number.isInteger(payload.credit_hours) || payload.credit_hours <= 0) {
+    fieldErrors.credit_hours = '请选择学时';
+  } else if (!await existsInTable('course_hour_options', 'credit_hours', payload.credit_hours)) {
+    fieldErrors.credit_hours = '学时必须从固定选项中选择';
+  }
+  if (!payload.dept_id) fieldErrors.dept_id = '请选择院系';
+  else if (!await existsInTable('department', 'dept_id', payload.dept_id)) {
+    fieldErrors.dept_id = '院系不存在';
+  }
+
+  return { payload, fieldErrors };
+}
+
 export async function listDepartments(_req: Request, res: Response) {
   const rows = await query<RowDataPacket[]>('SELECT * FROM department ORDER BY dept_id');
+  return success(res, rows);
+}
+
+export async function listStudentStatuses(_req: Request, res: Response) {
+  const rows = await query<RowDataPacket[]>(
+    `SELECT status_code, status_name, can_select_course
+     FROM student_statuses
+     ORDER BY FIELD(status_code, 'normal', 'suspended', 'graduated'), status_code`
+  );
+  return success(res, rows);
+}
+
+export async function listProfessionalRanks(_req: Request, res: Response) {
+  const rows = await query<RowDataPacket[]>(
+    `SELECT rank_id, rank_name
+     FROM professional_ranks
+     ORDER BY rank_id`
+  );
+  return success(res, rows);
+}
+
+export async function listCourseHourOptions(_req: Request, res: Response) {
+  const rows = await query<RowDataPacket[]>(
+    `SELECT credit_hours, required_weeks
+     FROM course_hour_options
+     ORDER BY credit_hours`
+  );
   return success(res, rows);
 }
 
@@ -150,13 +401,108 @@ export async function updateCourseSelectionWindow(req: Request, res: Response) {
   return success(res, courseSelectionWindowPayload(isOpen));
 }
 
+export async function sendNotification(req: AuthenticatedRequest, res: Response) {
+  const title = String(req.body?.title || '').trim();
+  const content = String(req.body?.content || '').trim();
+  const scope = String(req.body?.scope || 'all').trim();
+  const senderUserId = req.user?.userId;
+
+  if (!senderUserId) return fail(res, '未登录', 401);
+  if (!title) return fail(res, '请输入通知标题');
+  if (!content) return fail(res, '请输入通知内容');
+  if (!['all', 'students', 'teachers'].includes(scope)) {
+    return fail(res, '通知范围只能是 all、students 或 teachers');
+  }
+
+  const conn = await getConnection();
+  try {
+    await conn.beginTransaction();
+    const [mailResult] = await conn.execute<ResultSetHeader>(
+      `INSERT INTO mail_items (sender_user_id)
+       VALUES (?)`,
+      [senderUserId]
+    );
+    await conn.execute(
+      `INSERT INTO notification_messages (mail_item_id, title, content)
+       VALUES (?, ?, ?)`,
+      [mailResult.insertId, title, content]
+    );
+
+    if (scope === 'all' || scope === 'students') {
+      await conn.execute(
+        `INSERT INTO mail_recipients (mail_item_id, recipient_user_id)
+         SELECT ?, user_id
+         FROM student_accounts`,
+        [mailResult.insertId]
+      );
+    }
+    if (scope === 'all' || scope === 'teachers') {
+      await conn.execute(
+        `INSERT INTO mail_recipients (mail_item_id, recipient_user_id)
+         SELECT ?, user_id
+         FROM teacher_accounts`,
+        [mailResult.insertId]
+      );
+    }
+
+    await conn.commit();
+    return success(res, { mail_item_id: mailResult.insertId }, 'created', 201);
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
+}
+
+export async function listNotifications(req: AuthenticatedRequest, res: Response) {
+  if (!req.user?.userId) return fail(res, '未登录', 401);
+
+  const rows = await query<RowDataPacket[]>(
+    `SELECT
+       mi.mail_item_id,
+       nm.title,
+       nm.content,
+       mi.created_at,
+       COALESCE(aa.display_name, aa.username, '系统管理员') AS sender_name,
+       COUNT(mr.recipient_id) AS recipient_count,
+       SUM(CASE WHEN mr.read_at IS NULL THEN 0 ELSE 1 END) AS read_count
+     FROM mail_items AS mi
+     JOIN notification_messages AS nm ON nm.mail_item_id = mi.mail_item_id
+     LEFT JOIN admin_accounts AS aa ON aa.user_id = mi.sender_user_id
+     LEFT JOIN mail_recipients AS mr ON mr.mail_item_id = mi.mail_item_id
+     GROUP BY mi.mail_item_id, nm.title, nm.content, mi.created_at, aa.display_name, aa.username
+     ORDER BY mi.created_at DESC, mi.mail_item_id DESC`
+  );
+
+  return success(res, rows);
+}
+
+export async function deleteNotification(req: AuthenticatedRequest, res: Response) {
+  if (!req.user?.userId) return fail(res, '未登录', 401);
+
+  const result = await execute(
+    `DELETE mi
+     FROM mail_items AS mi
+     JOIN notification_messages AS nm ON nm.mail_item_id = mi.mail_item_id
+     WHERE mi.mail_item_id = ?`,
+    [req.params.mailItemId]
+  );
+  if (result.affectedRows === 0) {
+    return fail(res, '通知不存在', 404);
+  }
+
+  return success(res);
+}
+
 export async function listStudents(_req: Request, res: Response) {
   const rows = await query<RowDataPacket[]>(
     `SELECT
-       s.*, d.dept_name,
+       s.*, ss.status_name, ss.can_select_course, d.dept_name,
        COALESCE(selection_counts.selection_count, 0) AS selection_count,
        COALESCE(grade_counts.grade_count, 0) AS grade_count
      FROM student AS s
+     JOIN student_statuses AS ss ON ss.status_code = s.status_code
      JOIN department AS d ON d.dept_id = s.dept_id
      LEFT JOIN (
        SELECT student_id, COUNT(*) AS selection_count
@@ -176,24 +522,27 @@ export async function listStudents(_req: Request, res: Response) {
 
 export async function createStudent(req: Request, res: Response) {
   const body = req.body;
+  const { payload, fieldErrors } = await validateStudentPayload(body, 'create');
+  if (Object.keys(fieldErrors).length > 0) return failFieldErrors(res, fieldErrors);
+
   const conn = await getConnection();
   try {
     await conn.beginTransaction();
     await conn.execute(
-      `INSERT INTO student (student_id, name, sex, date_of_birth, native_place, mobile_phone, dept_id, status)
+      `INSERT INTO student (student_id, name, sex, date_of_birth, native_place, mobile_phone, dept_id, status_code)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        body.student_id,
-        body.name,
-        body.sex,
-        body.date_of_birth,
-        body.native_place,
-        body.mobile_phone,
-        body.dept_id,
-        body.status || '正常'
+        payload.student_id,
+        payload.name,
+        payload.sex,
+        payload.date_of_birth,
+        payload.native_place,
+        payload.mobile_phone,
+        payload.dept_id,
+        payload.status_code
       ]
     );
-    await upsertUser(conn, 'student', body.password, body.student_id);
+    await upsertUser(conn, 'student', payload.password, payload.student_id);
     await conn.commit();
     return success(res, null, 'created', 201);
   } catch (error) {
@@ -206,22 +555,40 @@ export async function createStudent(req: Request, res: Response) {
 
 export async function updateStudent(req: Request, res: Response) {
   const body = req.body;
-  await execute(
-    `UPDATE student
-     SET name = ?, sex = ?, date_of_birth = ?, native_place = ?, mobile_phone = ?, dept_id = ?, status = ?
-     WHERE student_id = ?`,
-    [
-      body.name,
-      body.sex,
-      body.date_of_birth,
-      body.native_place,
-      body.mobile_phone,
-      body.dept_id,
-      body.status || '正常',
-      req.params.id
-    ]
-  );
-  return success(res);
+  const studentId = String(req.params.id);
+  if (!await existsInTable('student', 'student_id', studentId)) {
+    return fail(res, '学生不存在', 404);
+  }
+  const { payload, fieldErrors } = await validateStudentPayload(body, 'update', studentId);
+  if (Object.keys(fieldErrors).length > 0) return failFieldErrors(res, fieldErrors);
+
+  const conn = await getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.execute(
+      `UPDATE student
+       SET name = ?, sex = ?, date_of_birth = ?, native_place = ?, mobile_phone = ?, dept_id = ?, status_code = ?
+       WHERE student_id = ?`,
+      [
+        payload.name,
+        payload.sex,
+        payload.date_of_birth,
+        payload.native_place,
+        payload.mobile_phone,
+        payload.dept_id,
+        payload.status_code,
+        studentId
+      ]
+    );
+    await updateBoundUserPassword(conn, 'student', studentId, payload.password);
+    await conn.commit();
+    return success(res);
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
 }
 
 export async function deleteStudent(req: Request, res: Response) {
@@ -261,15 +628,31 @@ export async function deleteStudent(req: Request, res: Response) {
 export async function listTeachers(_req: Request, res: Response) {
   const rows = await query<RowDataPacket[]>(
     `SELECT
-       t.*, d.dept_name,
-       COALESCE(offering_counts.offering_count, 0) AS offering_count
+       t.*, pr.rank_name AS professional_rank_name, pr.rank_name AS professional_ranks, d.dept_name,
+       COALESCE(offering_counts.offering_count, 0) AS offering_count,
+       COALESCE(substitution_counts.substitution_count, 0) AS substitution_count
      FROM teacher AS t
+     JOIN professional_ranks AS pr ON pr.rank_id = t.professional_rank_id
      JOIN department AS d ON d.dept_id = t.dept_id
      LEFT JOIN (
        SELECT staff_id, COUNT(*) AS offering_count
        FROM course_offerings
        GROUP BY staff_id
      ) AS offering_counts ON offering_counts.staff_id = t.staff_id
+     LEFT JOIN (
+       SELECT staff_id, SUM(substitution_count) AS substitution_count
+       FROM (
+         SELECT c.staff_id, COUNT(*) AS substitution_count
+         FROM substitution_requests AS sr
+         JOIN course_offerings AS c ON c.offering_id = sr.offering_id
+         GROUP BY c.staff_id
+         UNION ALL
+         SELECT substitute_staff_id AS staff_id, COUNT(*) AS substitution_count
+         FROM substitution_requests
+         GROUP BY substitute_staff_id
+       ) AS teacher_substitutions
+       GROUP BY staff_id
+     ) AS substitution_counts ON substitution_counts.staff_id = t.staff_id
      ORDER BY t.staff_id`
   );
   return success(res, rows.map((row) => addDeleteState(row, teacherDeleteReason(row))));
@@ -277,15 +660,26 @@ export async function listTeachers(_req: Request, res: Response) {
 
 export async function createTeacher(req: Request, res: Response) {
   const body = req.body;
+  const { payload, fieldErrors } = await validateTeacherPayload(body, 'create');
+  if (Object.keys(fieldErrors).length > 0) return failFieldErrors(res, fieldErrors);
+
   const conn = await getConnection();
   try {
     await conn.beginTransaction();
     await conn.execute(
-      `INSERT INTO teacher (staff_id, name, sex, date_of_birth, professional_ranks, salary, dept_id)
+      `INSERT INTO teacher (staff_id, name, sex, date_of_birth, professional_rank_id, salary, dept_id)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [body.staff_id, body.name, body.sex, body.date_of_birth, body.professional_ranks, body.salary, body.dept_id]
+      [
+        payload.staff_id,
+        payload.name,
+        payload.sex,
+        payload.date_of_birth,
+        payload.professional_rank_id,
+        payload.salary,
+        payload.dept_id
+      ]
     );
-    await upsertUser(conn, 'teacher', body.password, body.staff_id);
+    await upsertUser(conn, 'teacher', payload.password, payload.staff_id);
     await conn.commit();
     return success(res, null, 'created', 201);
   } catch (error) {
@@ -298,19 +692,50 @@ export async function createTeacher(req: Request, res: Response) {
 
 export async function updateTeacher(req: Request, res: Response) {
   const body = req.body;
-  await execute(
-    `UPDATE teacher
-     SET name = ?, sex = ?, date_of_birth = ?, professional_ranks = ?, salary = ?, dept_id = ?
-     WHERE staff_id = ?`,
-    [body.name, body.sex, body.date_of_birth, body.professional_ranks, body.salary, body.dept_id, req.params.id]
-  );
-  return success(res);
+  const staffId = String(req.params.id);
+  if (!await existsInTable('teacher', 'staff_id', staffId)) {
+    return fail(res, '教师不存在', 404);
+  }
+  const { payload, fieldErrors } = await validateTeacherPayload(body, 'update', staffId);
+  if (Object.keys(fieldErrors).length > 0) return failFieldErrors(res, fieldErrors);
+
+  const conn = await getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.execute(
+      `UPDATE teacher
+       SET name = ?, sex = ?, date_of_birth = ?, professional_rank_id = ?, salary = ?, dept_id = ?
+       WHERE staff_id = ?`,
+      [
+        payload.name,
+        payload.sex,
+        payload.date_of_birth,
+        payload.professional_rank_id,
+        payload.salary,
+        payload.dept_id,
+        staffId
+      ]
+    );
+    await updateBoundUserPassword(conn, 'teacher', staffId, payload.password);
+    await conn.commit();
+    return success(res);
+  } catch (error) {
+    await conn.rollback();
+    throw error;
+  } finally {
+    conn.release();
+  }
 }
 
 export async function deleteTeacher(req: Request, res: Response) {
   const dependencyRows = await query<RowDataPacket[]>(
-    'SELECT COUNT(*) AS offering_count FROM course_offerings WHERE staff_id = ?',
-    [req.params.id]
+    `SELECT
+       (SELECT COUNT(*) FROM course_offerings WHERE staff_id = ?) AS offering_count,
+       (SELECT COUNT(*)
+        FROM substitution_requests AS sr
+        JOIN course_offerings AS c ON c.offering_id = sr.offering_id
+        WHERE c.staff_id = ? OR sr.substitute_staff_id = ?) AS substitution_count`,
+    [req.params.id, req.params.id, req.params.id]
   );
   const reason = teacherDeleteReason(dependencyRows[0]);
   if (reason) return fail(res, reason);
@@ -339,10 +764,11 @@ export async function deleteTeacher(req: Request, res: Response) {
 export async function listCourses(_req: Request, res: Response) {
   const rows = await query<RowDataPacket[]>(
     `SELECT
-       c.*, d.dept_name,
+       c.*, cho.required_weeks, d.dept_name,
        COALESCE(offering_counts.offering_count, 0) AS offering_count,
        COALESCE(selection_counts.selection_count, 0) AS selection_count
      FROM course AS c
+     JOIN course_hour_options AS cho ON cho.credit_hours = c.credit_hours
      JOIN department AS d ON d.dept_id = c.dept_id
      LEFT JOIN (
        SELECT course_id, COUNT(*) AS offering_count
@@ -362,21 +788,31 @@ export async function listCourses(_req: Request, res: Response) {
 
 export async function createCourse(req: Request, res: Response) {
   const body = req.body;
+  const { payload, fieldErrors } = await validateCoursePayload(body, 'create');
+  if (Object.keys(fieldErrors).length > 0) return failFieldErrors(res, fieldErrors);
+
   await execute(
     `INSERT INTO course (course_id, course_name, credit, credit_hours, dept_id)
      VALUES (?, ?, ?, ?, ?)`,
-    [body.course_id, body.course_name, body.credit, body.credit_hours, body.dept_id]
+    [payload.course_id, payload.course_name, payload.credit, payload.credit_hours, payload.dept_id]
   );
   return success(res, null, 'created', 201);
 }
 
 export async function updateCourse(req: Request, res: Response) {
   const body = req.body;
+  const courseId = String(req.params.id);
+  if (!await existsInTable('course', 'course_id', courseId)) {
+    return fail(res, '课程不存在', 404);
+  }
+  const { payload, fieldErrors } = await validateCoursePayload(body, 'update', courseId);
+  if (Object.keys(fieldErrors).length > 0) return failFieldErrors(res, fieldErrors);
+
   await execute(
     `UPDATE course
      SET course_name = ?, credit = ?, credit_hours = ?, dept_id = ?
      WHERE course_id = ?`,
-    [body.course_name, body.credit, body.credit_hours, body.dept_id, req.params.id]
+    [payload.course_name, payload.credit, payload.credit_hours, payload.dept_id, courseId]
   );
   return success(res);
 }
@@ -507,54 +943,68 @@ export async function createCourseOffering(req: Request, res: Response) {
   const body = req.body;
   const payload = await validateCourseOfferingPayload(body, res);
   if (!payload) return null;
-  await execute(
-    `INSERT INTO course_offerings (semester_id, course_id, staff_id, class_time, capacity, status, classroom_building_no, classroom_room_no)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      body.semester,
-      body.course_id,
-      body.staff_id,
-      body.class_time,
-      payload.capacity,
-      payload.status,
-      payload.classroomBuildingNo,
-      payload.classroomRoomNo
-    ]
-  );
-  return success(res, null, 'created', 201);
+  try {
+    await execute(
+      `INSERT INTO course_offerings (semester_id, course_id, staff_id, class_time, capacity, status, classroom_building_no, classroom_room_no)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        body.semester,
+        body.course_id,
+        body.staff_id,
+        body.class_time,
+        payload.capacity,
+        payload.status,
+        payload.classroomBuildingNo,
+        payload.classroomRoomNo
+      ]
+    );
+    return success(res, null, 'created', 201);
+  } catch (error) {
+    const fieldErrors = courseOfferingDuplicateFieldErrors(error);
+    if (fieldErrors) return failFieldErrors(res, fieldErrors);
+    throw error;
+  }
 }
 
 export async function updateCourseOffering(req: Request, res: Response) {
   const body = req.body;
   const payload = await validateCourseOfferingPayload(body, res, Number(req.params.id));
   if (!payload) return null;
-  await execute(
-    `UPDATE course_offerings
-     SET semester_id = ?, course_id = ?, staff_id = ?, class_time = ?, capacity = ?, status = ?,
-         classroom_building_no = ?, classroom_room_no = ?
-     WHERE offering_id = ?`,
-    [
-      body.semester,
-      body.course_id,
-      body.staff_id,
-      body.class_time,
-      payload.capacity,
-      payload.status,
-      payload.classroomBuildingNo,
-      payload.classroomRoomNo,
-      req.params.id
-    ]
-  );
-  return success(res);
+  try {
+    await execute(
+      `UPDATE course_offerings
+       SET semester_id = ?, course_id = ?, staff_id = ?, class_time = ?, capacity = ?, status = ?,
+           classroom_building_no = ?, classroom_room_no = ?
+       WHERE offering_id = ?`,
+      [
+        body.semester,
+        body.course_id,
+        body.staff_id,
+        body.class_time,
+        payload.capacity,
+        payload.status,
+        payload.classroomBuildingNo,
+        payload.classroomRoomNo,
+        req.params.id
+      ]
+    );
+    return success(res);
+  } catch (error) {
+    const fieldErrors = courseOfferingDuplicateFieldErrors(error);
+    if (fieldErrors) return failFieldErrors(res, fieldErrors);
+    throw error;
+  }
 }
 
 export async function deleteCourseOffering(req: Request, res: Response) {
   const dependencyRows = await query<RowDataPacket[]>(
     `SELECT
        c.offering_id,
-       COUNT(cs.selection_id) AS selection_count
+       COUNT(DISTINCT cs.selection_id) AS selection_count,
+       COUNT(DISTINCT sr.mail_item_id) AS substitution_count
      FROM course_offerings AS c
      LEFT JOIN course_selection AS cs ON cs.offering_id = c.offering_id
+     LEFT JOIN substitution_requests AS sr ON sr.offering_id = c.offering_id
      WHERE c.offering_id = ?
      GROUP BY c.offering_id`,
     [req.params.id]
@@ -571,17 +1021,34 @@ async function validateCourseOfferingPayload(body: any, res: Response, offeringI
   const capacity = Number(body.capacity);
   const status = body.status || 'open';
   const classroom = parseClassroom(body.classroom);
+  const semester = cleanText(body.semester);
+  const courseId = cleanText(body.course_id);
+  const staffId = cleanText(body.staff_id);
+  const classTime = cleanText(body.class_time);
+  const fieldErrors: FieldErrors = {};
+
+  if (!semester) fieldErrors.semester = '请选择学期';
+  else if (!await existsInTable('semesters', 'semester_id', semester)) fieldErrors.semester = '学期不存在';
+  if (!courseId) fieldErrors.course_id = '请选择课程';
+  else if (!await existsInTable('course', 'course_id', courseId)) fieldErrors.course_id = '课程不存在';
+  if (!staffId) fieldErrors.staff_id = '请选择教师';
+  else if (!await existsInTable('teacher', 'staff_id', staffId)) fieldErrors.staff_id = '教师不存在';
+  if (!classTime) fieldErrors.class_time = '请选择上课时间';
+  if (Object.keys(fieldErrors).length > 0) {
+    failFieldErrors(res, fieldErrors);
+    return null;
+  }
 
   if (!classroom) {
-    fail(res, '请选择教室');
+    failFieldErrors(res, { classroom: '请选择教室' });
     return null;
   }
   if (!Number.isFinite(capacity) || capacity <= 0) {
-    fail(res, '课程容量必须大于 0');
+    failFieldErrors(res, { capacity: '课程容量必须大于 0' });
     return null;
   }
   if (!OFFERING_STATUS_VALUES.has(status)) {
-    fail(res, '课程状态只能是 open 或 closed');
+    failFieldErrors(res, { status: '课程状态只能是 open 或 closed' });
     return null;
   }
 
@@ -594,11 +1061,45 @@ async function validateCourseOfferingPayload(body: any, res: Response, offeringI
   );
   const classroomRow = classroomRows[0];
   if (!classroomRow) {
-    fail(res, '教室不存在或不可用', 404);
+    failFieldErrors(res, { classroom: '教室不存在或不可用' });
     return null;
   }
   if (capacity > Number(classroomRow.capacity)) {
-    fail(res, `课程容量不能超过教室容量 ${classroomRow.capacity}`);
+    failFieldErrors(res, { capacity: `课程容量不能超过教室容量 ${classroomRow.capacity}` });
+    return null;
+  }
+
+  const conflictErrors: FieldErrors = {};
+  const offeringExcludeSql = offeringId ? ' AND offering_id <> ?' : '';
+  const offeringExcludeParams = offeringId ? [offeringId] : [];
+  const businessConflictRows = await query<RowDataPacket[]>(
+    `SELECT offering_id
+     FROM course_offerings
+     WHERE semester_id = ? AND course_id = ? AND staff_id = ?${offeringExcludeSql}
+     LIMIT 1`,
+    [semester, courseId, staffId, ...offeringExcludeParams]
+  );
+  if (businessConflictRows.length > 0) {
+    conflictErrors.course_id = '该学期该教师已开设这门课程';
+    conflictErrors.staff_id = '该教师本学期已开设这门课程';
+  }
+
+  const classroomConflictRows = await query<RowDataPacket[]>(
+    `SELECT offering_id
+     FROM course_offerings
+     WHERE semester_id = ?
+       AND class_time = ?
+       AND classroom_building_no = ?
+       AND classroom_room_no = ?${offeringExcludeSql}
+     LIMIT 1`,
+    [semester, classTime, classroom.buildingNo, classroom.roomNo, ...offeringExcludeParams]
+  );
+  if (classroomConflictRows.length > 0) {
+    conflictErrors.class_time = '该时间段教室已被占用';
+    conflictErrors.classroom = '该教室在该时间已有课程';
+  }
+  if (Object.keys(conflictErrors).length > 0) {
+    failFieldErrors(res, conflictErrors);
     return null;
   }
 
@@ -612,7 +1113,7 @@ async function validateCourseOfferingPayload(body: any, res: Response, offeringI
     );
     const selectedCount = Number(selectedRows[0]?.selected_count || 0);
     if (capacity < selectedCount) {
-      fail(res, `课程容量不能小于当前已选人数 ${selectedCount}`);
+      failFieldErrors(res, { capacity: `课程容量不能小于当前已选人数 ${selectedCount}` });
       return null;
     }
   }

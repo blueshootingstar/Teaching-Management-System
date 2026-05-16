@@ -33,6 +33,29 @@ CREATE TABLE system_settings (
   PRIMARY KEY (setting_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE student_statuses (
+  status_code VARCHAR(20) NOT NULL,
+  status_name VARCHAR(20) NOT NULL,
+  can_select_course TINYINT(1) NOT NULL DEFAULT 0,
+  PRIMARY KEY (status_code),
+  UNIQUE KEY uk_student_statuses_name (status_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE professional_ranks (
+  rank_id TINYINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  rank_name VARCHAR(20) NOT NULL,
+  PRIMARY KEY (rank_id),
+  UNIQUE KEY uk_professional_ranks_name (rank_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE course_hour_options (
+  credit_hours INT NOT NULL,
+  required_weeks INT NOT NULL,
+  PRIMARY KEY (credit_hours),
+  CONSTRAINT chk_course_hour_options_hours CHECK (credit_hours > 0),
+  CONSTRAINT chk_course_hour_options_weeks CHECK (required_weeks BETWEEN 1 AND 16)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE classrooms (
   building_no CHAR(1) NOT NULL,
   room_no VARCHAR(10) NOT NULL,
@@ -50,10 +73,12 @@ CREATE TABLE student (
   native_place VARCHAR(50) NOT NULL,
   mobile_phone VARCHAR(20) NOT NULL,
   dept_id CHAR(2) NOT NULL,
-  status VARCHAR(20) NOT NULL DEFAULT '正常',
+  status_code VARCHAR(20) NOT NULL DEFAULT 'normal',
   PRIMARY KEY (student_id),
   KEY idx_student_dept_name (dept_id, name DESC),
-  CONSTRAINT fk_student_department FOREIGN KEY (dept_id) REFERENCES department (dept_id)
+  KEY idx_student_status (status_code),
+  CONSTRAINT fk_student_department FOREIGN KEY (dept_id) REFERENCES department (dept_id),
+  CONSTRAINT fk_student_status FOREIGN KEY (status_code) REFERENCES student_statuses (status_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE teacher (
@@ -61,12 +86,14 @@ CREATE TABLE teacher (
   name VARCHAR(50) NOT NULL,
   sex ENUM('男','女') NOT NULL,
   date_of_birth DATE NOT NULL,
-  professional_ranks VARCHAR(20) NOT NULL,
+  professional_rank_id TINYINT UNSIGNED NOT NULL,
   salary DECIMAL(10,2) NOT NULL,
   dept_id CHAR(2) NOT NULL,
   PRIMARY KEY (staff_id),
   KEY idx_teacher_dept (dept_id),
-  CONSTRAINT fk_teacher_department FOREIGN KEY (dept_id) REFERENCES department (dept_id)
+  KEY idx_teacher_rank (professional_rank_id),
+  CONSTRAINT fk_teacher_department FOREIGN KEY (dept_id) REFERENCES department (dept_id),
+  CONSTRAINT fk_teacher_professional_rank FOREIGN KEY (professional_rank_id) REFERENCES professional_ranks (rank_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE course (
@@ -78,7 +105,9 @@ CREATE TABLE course (
   PRIMARY KEY (course_id),
   KEY idx_course_dept (dept_id),
   KEY idx_course_name (course_name),
-  CONSTRAINT fk_course_department FOREIGN KEY (dept_id) REFERENCES department (dept_id)
+  KEY idx_course_credit_hours (credit_hours),
+  CONSTRAINT fk_course_department FOREIGN KEY (dept_id) REFERENCES department (dept_id),
+  CONSTRAINT fk_course_hour_option FOREIGN KEY (credit_hours) REFERENCES course_hour_options (credit_hours)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE course_offerings (
@@ -93,6 +122,7 @@ CREATE TABLE course_offerings (
   classroom_room_no VARCHAR(10) NOT NULL,
   PRIMARY KEY (offering_id),
   UNIQUE KEY uk_course_offerings_business (semester_id, course_id, staff_id),
+  UNIQUE KEY uk_course_offerings_classroom_time (semester_id, class_time, classroom_building_no, classroom_room_no),
   KEY idx_course_offerings_course (course_id),
   KEY idx_course_offerings_teacher (staff_id),
   KEY idx_course_offerings_semester_status (semester_id, status),
@@ -149,6 +179,51 @@ CREATE TABLE teacher_accounts (
   CONSTRAINT fk_teacher_accounts_teacher FOREIGN KEY (staff_id) REFERENCES teacher (staff_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE mail_items (
+  mail_item_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  sender_user_id BIGINT UNSIGNED NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (mail_item_id),
+  KEY idx_mail_items_sender (sender_user_id),
+  CONSTRAINT fk_mail_items_sender FOREIGN KEY (sender_user_id) REFERENCES users (user_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE notification_messages (
+  mail_item_id BIGINT UNSIGNED NOT NULL,
+  title VARCHAR(100) NOT NULL,
+  content TEXT NOT NULL,
+  PRIMARY KEY (mail_item_id),
+  CONSTRAINT fk_notification_messages_mail FOREIGN KEY (mail_item_id) REFERENCES mail_items (mail_item_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE mail_recipients (
+  recipient_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  mail_item_id BIGINT UNSIGNED NOT NULL,
+  recipient_user_id BIGINT UNSIGNED NOT NULL,
+  read_at DATETIME NULL,
+  PRIMARY KEY (recipient_id),
+  UNIQUE KEY uk_mail_recipients_item_user (mail_item_id, recipient_user_id),
+  KEY idx_mail_recipients_user_read (recipient_user_id, read_at),
+  CONSTRAINT fk_mail_recipients_mail FOREIGN KEY (mail_item_id) REFERENCES mail_items (mail_item_id) ON DELETE CASCADE,
+  CONSTRAINT fk_mail_recipients_user FOREIGN KEY (recipient_user_id) REFERENCES users (user_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE substitution_requests (
+  mail_item_id BIGINT UNSIGNED NOT NULL,
+  offering_id BIGINT UNSIGNED NOT NULL,
+  week_no INT NOT NULL,
+  substitute_staff_id CHAR(4) NOT NULL,
+  status ENUM('pending','accepted','rejected') NOT NULL DEFAULT 'pending',
+  reason VARCHAR(255) NULL,
+  PRIMARY KEY (mail_item_id),
+  KEY idx_substitution_requests_offering_week (offering_id, week_no, status),
+  KEY idx_substitution_requests_substitute (substitute_staff_id, status),
+  CONSTRAINT fk_substitution_requests_mail FOREIGN KEY (mail_item_id) REFERENCES mail_items (mail_item_id) ON DELETE CASCADE,
+  CONSTRAINT fk_substitution_requests_offering FOREIGN KEY (offering_id) REFERENCES course_offerings (offering_id),
+  CONSTRAINT fk_substitution_requests_substitute FOREIGN KEY (substitute_staff_id) REFERENCES teacher (staff_id),
+  CONSTRAINT chk_substitution_requests_week CHECK (week_no BETWEEN 1 AND 16)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE grades (
   grade_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   selection_id BIGINT UNSIGNED NOT NULL,
@@ -162,6 +237,8 @@ CREATE TABLE grades (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 DROP TRIGGER IF EXISTS trg_course_selection_after_insert;
+DROP TRIGGER IF EXISTS trg_substitution_requests_before_insert;
+DROP TRIGGER IF EXISTS trg_substitution_requests_before_update;
 
 DELIMITER $$
 
@@ -173,6 +250,107 @@ BEGIN
   VALUES (NEW.selection_id)
   ON DUPLICATE KEY UPDATE
     selection_id = VALUES(selection_id);
+END $$
+
+CREATE TRIGGER trg_substitution_requests_before_insert
+BEFORE INSERT ON substitution_requests
+FOR EACH ROW
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM mail_items AS mi
+    JOIN teacher_accounts AS ta ON ta.user_id = mi.sender_user_id
+    JOIN course_offerings AS co ON co.offering_id = NEW.offering_id
+    WHERE mi.mail_item_id = NEW.mail_item_id
+      AND co.staff_id = ta.staff_id
+  ) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'substitution request sender must own the offering';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM course_offerings
+    WHERE offering_id = NEW.offering_id
+      AND staff_id = NEW.substitute_staff_id
+  ) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'substitute teacher must be different from original teacher';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM course_offerings AS co
+    JOIN course AS c ON c.course_id = co.course_id
+    JOIN course_hour_options AS cho ON cho.credit_hours = c.credit_hours
+    WHERE co.offering_id = NEW.offering_id
+      AND NEW.week_no <= cho.required_weeks
+  ) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'substitution week exceeds course required weeks';
+  END IF;
+
+  IF NEW.status IN ('pending', 'accepted') AND EXISTS (
+    SELECT 1
+    FROM substitution_requests
+    WHERE offering_id = NEW.offering_id
+      AND week_no = NEW.week_no
+      AND status IN ('pending', 'accepted')
+  ) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'duplicate active substitution request for this offering and week';
+  END IF;
+END $$
+
+CREATE TRIGGER trg_substitution_requests_before_update
+BEFORE UPDATE ON substitution_requests
+FOR EACH ROW
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM mail_items AS mi
+    JOIN teacher_accounts AS ta ON ta.user_id = mi.sender_user_id
+    JOIN course_offerings AS co ON co.offering_id = NEW.offering_id
+    WHERE mi.mail_item_id = NEW.mail_item_id
+      AND co.staff_id = ta.staff_id
+  ) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'substitution request sender must own the offering';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM course_offerings
+    WHERE offering_id = NEW.offering_id
+      AND staff_id = NEW.substitute_staff_id
+  ) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'substitute teacher must be different from original teacher';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM course_offerings AS co
+    JOIN course AS c ON c.course_id = co.course_id
+    JOIN course_hour_options AS cho ON cho.credit_hours = c.credit_hours
+    WHERE co.offering_id = NEW.offering_id
+      AND NEW.week_no <= cho.required_weeks
+  ) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'substitution week exceeds course required weeks';
+  END IF;
+
+  IF NEW.status IN ('pending', 'accepted') AND EXISTS (
+    SELECT 1
+    FROM substitution_requests
+    WHERE offering_id = NEW.offering_id
+      AND week_no = NEW.week_no
+      AND status IN ('pending', 'accepted')
+      AND mail_item_id <> NEW.mail_item_id
+  ) THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'duplicate active substitution request for this offering and week';
+  END IF;
 END $$
 
 DELIMITER ;
@@ -196,6 +374,25 @@ VALUES
 
 INSERT INTO system_settings (setting_key, setting_value)
 VALUES ('course_selection_open', '1');
+
+INSERT INTO student_statuses (status_code, status_name, can_select_course)
+VALUES
+  ('normal', '正常', 1),
+  ('suspended', '休学', 0),
+  ('graduated', '毕业', 0);
+
+INSERT INTO professional_ranks (rank_id, rank_name)
+VALUES
+  (1, '教授'),
+  (2, '副教授'),
+  (3, '讲师');
+
+INSERT INTO course_hour_options (credit_hours, required_weeks)
+VALUES
+  (16, 4),
+  (32, 8),
+  (48, 12),
+  (64, 16);
 
 INSERT INTO classrooms (building_no, room_no, capacity, status)
 VALUES
@@ -235,81 +432,81 @@ VALUES
   ('G', '305', 90, 'available'),
   ('G', '405', 100, 'available');
 
-INSERT INTO student (student_id, name, sex, date_of_birth, native_place, mobile_phone, dept_id, status)
+INSERT INTO student (student_id, name, sex, date_of_birth, native_place, mobile_phone, dept_id, status_code)
 VALUES
-  ('1101', '李明', '男', '1993-03-06', '上海', '13613005486', '02', '正常'),
-  ('1102', '刘晓明', '男', '1992-12-08', '安徽', '18913457890', '01', '正常'),
-  ('1103', '张颖', '女', '1993-01-05', '江苏', '18826490423', '01', '正常'),
-  ('1104', '刘晶晶', '女', '1994-11-06', '上海', '13331934111', '01', '正常'),
-  ('1105', '刘成刚', '男', '1990-06-06', '上海', '18015872567', '01', '正常'),
-  ('1106', '李二丽', '女', '1993-05-04', '江苏', '18107620945', '01', '正常'),
-  ('1107', '张晓峰', '男', '1992-08-16', '浙江', '13912341078', '01', '正常'),
-  ('1108', '王晨', '男', '1993-09-12', '山东', '13700000000', '01', '正常'),
-  ('1109', '赵雨晴', '女', '1994-02-17', '浙江', '13700000001', '01', '正常'),
-  ('1110', '陈思远', '男', '1993-07-21', '江苏', '13700000002', '02', '正常'),
-  ('1111', '周雅雯', '女', '1994-04-03', '福建', '13700000003', '02', '正常'),
-  ('1112', '黄子豪', '男', '1992-10-11', '广东', '13700000004', '03', '正常'),
-  ('1113', '吴欣怡', '女', '1993-12-24', '湖北', '13700000005', '03', '正常'),
-  ('1114', '郑浩然', '男', '1994-01-15', '河南', '13700000006', '04', '正常'),
-  ('1115', '许佳宁', '女', '1993-08-29', '上海', '13700000007', '04', '正常'),
-  ('1116', '孙一鸣', '男', '1992-11-30', '安徽', '13700000008', '05', '正常'),
-  ('1117', '朱琳', '女', '1994-06-19', '江西', '13700000009', '05', '正常'),
-  ('1118', '胡嘉豪', '男', '1993-05-09', '湖南', '13700000010', '01', '正常'),
-  ('1119', '林可欣', '女', '1994-03-22', '浙江', '13700000011', '01', '正常'),
-  ('1120', '高远', '男', '1992-09-14', '山东', '13700000012', '02', '正常'),
-  ('1121', '罗婧', '女', '1993-11-08', '四川', '13700000013', '02', '正常'),
-  ('1122', '梁博文', '男', '1994-07-02', '广东', '13700000014', '03', '正常'),
-  ('1123', '宋佳琪', '女', '1993-02-26', '江苏', '13700000015', '03', '正常'),
-  ('1124', '唐昊', '男', '1992-12-18', '重庆', '13700000016', '04', '正常'),
-  ('1125', '韩悦', '女', '1994-05-13', '河南', '13700000017', '04', '正常'),
-  ('1126', '谢文轩', '男', '1993-06-06', '湖北', '13700000018', '05', '正常'),
-  ('1127', '邓雨薇', '女', '1994-09-25', '湖南', '13700000019', '05', '正常'),
-  ('1128', '曹宇航', '男', '1993-01-18', '河北', '13700000020', '01', '正常'),
-  ('1129', '彭诗涵', '女', '1994-10-07', '江西', '13700000021', '01', '正常'),
-  ('1130', '袁泽宇', '男', '1992-08-05', '辽宁', '13700000022', '02', '正常'),
-  ('1131', '曾梦瑶', '女', '1993-04-16', '福建', '13700000023', '02', '正常'),
-  ('1132', '田嘉诚', '男', '1994-12-01', '山西', '13700000024', '03', '正常'),
-  ('1133', '叶雨桐', '女', '1993-07-27', '浙江', '13700000025', '03', '正常'),
-  ('1134', '丁睿', '男', '1992-05-20', '上海', '13700000026', '04', '正常'),
-  ('1135', '潘思琪', '女', '1994-11-11', '安徽', '13700000027', '04', '正常'),
-  ('1136', '邹俊杰', '男', '1993-03-03', '江苏', '13700000028', '05', '正常'),
-  ('1137', '姜雪', '女', '1994-01-09', '山东', '13700000029', '05', '正常'),
-  ('1138', '范成', '男', '1992-06-28', '广东', '13700000030', '01', '正常'),
-  ('1139', '秦悦然', '女', '1993-10-31', '四川', '13700000031', '02', '正常'),
-  ('1140', '姚天宇', '男', '1994-04-24', '重庆', '13700000032', '03', '正常');
+  ('1101', '李明', '男', '1993-03-06', '上海', '13613005486', '02', 'normal'),
+  ('1102', '刘晓明', '男', '1992-12-08', '安徽', '18913457890', '01', 'normal'),
+  ('1103', '张颖', '女', '1993-01-05', '江苏', '18826490423', '01', 'normal'),
+  ('1104', '刘晶晶', '女', '1994-11-06', '上海', '13331934111', '01', 'normal'),
+  ('1105', '刘成刚', '男', '1990-06-06', '上海', '18015872567', '01', 'normal'),
+  ('1106', '李二丽', '女', '1993-05-04', '江苏', '18107620945', '01', 'normal'),
+  ('1107', '张晓峰', '男', '1992-08-16', '浙江', '13912341078', '01', 'normal'),
+  ('1108', '王晨', '男', '1993-09-12', '山东', '13700000000', '01', 'normal'),
+  ('1109', '赵雨晴', '女', '1994-02-17', '浙江', '13700000001', '01', 'normal'),
+  ('1110', '陈思远', '男', '1993-07-21', '江苏', '13700000002', '02', 'normal'),
+  ('1111', '周雅雯', '女', '1994-04-03', '福建', '13700000003', '02', 'normal'),
+  ('1112', '黄子豪', '男', '1992-10-11', '广东', '13700000004', '03', 'normal'),
+  ('1113', '吴欣怡', '女', '1993-12-24', '湖北', '13700000005', '03', 'normal'),
+  ('1114', '郑浩然', '男', '1994-01-15', '河南', '13700000006', '04', 'normal'),
+  ('1115', '许佳宁', '女', '1993-08-29', '上海', '13700000007', '04', 'normal'),
+  ('1116', '孙一鸣', '男', '1992-11-30', '安徽', '13700000008', '05', 'normal'),
+  ('1117', '朱琳', '女', '1994-06-19', '江西', '13700000009', '05', 'normal'),
+  ('1118', '胡嘉豪', '男', '1993-05-09', '湖南', '13700000010', '01', 'normal'),
+  ('1119', '林可欣', '女', '1994-03-22', '浙江', '13700000011', '01', 'normal'),
+  ('1120', '高远', '男', '1992-09-14', '山东', '13700000012', '02', 'normal'),
+  ('1121', '罗婧', '女', '1993-11-08', '四川', '13700000013', '02', 'normal'),
+  ('1122', '梁博文', '男', '1994-07-02', '广东', '13700000014', '03', 'normal'),
+  ('1123', '宋佳琪', '女', '1993-02-26', '江苏', '13700000015', '03', 'normal'),
+  ('1124', '唐昊', '男', '1992-12-18', '重庆', '13700000016', '04', 'normal'),
+  ('1125', '韩悦', '女', '1994-05-13', '河南', '13700000017', '04', 'normal'),
+  ('1126', '谢文轩', '男', '1993-06-06', '湖北', '13700000018', '05', 'normal'),
+  ('1127', '邓雨薇', '女', '1994-09-25', '湖南', '13700000019', '05', 'normal'),
+  ('1128', '曹宇航', '男', '1993-01-18', '河北', '13700000020', '01', 'normal'),
+  ('1129', '彭诗涵', '女', '1994-10-07', '江西', '13700000021', '01', 'normal'),
+  ('1130', '袁泽宇', '男', '1992-08-05', '辽宁', '13700000022', '02', 'normal'),
+  ('1131', '曾梦瑶', '女', '1993-04-16', '福建', '13700000023', '02', 'normal'),
+  ('1132', '田嘉诚', '男', '1994-12-01', '山西', '13700000024', '03', 'normal'),
+  ('1133', '叶雨桐', '女', '1993-07-27', '浙江', '13700000025', '03', 'normal'),
+  ('1134', '丁睿', '男', '1992-05-20', '上海', '13700000026', '04', 'normal'),
+  ('1135', '潘思琪', '女', '1994-11-11', '安徽', '13700000027', '04', 'normal'),
+  ('1136', '邹俊杰', '男', '1993-03-03', '江苏', '13700000028', '05', 'normal'),
+  ('1137', '姜雪', '女', '1994-01-09', '山东', '13700000029', '05', 'normal'),
+  ('1138', '范成', '男', '1992-06-28', '广东', '13700000030', '01', 'normal'),
+  ('1139', '秦悦然', '女', '1993-10-31', '四川', '13700000031', '02', 'normal'),
+  ('1140', '姚天宇', '男', '1994-04-24', '重庆', '13700000032', '03', 'normal');
 
-INSERT INTO teacher (staff_id, name, sex, date_of_birth, professional_ranks, salary, dept_id)
+INSERT INTO teacher (staff_id, name, sex, date_of_birth, professional_rank_id, salary, dept_id)
 VALUES
-  ('0101', '陈迪茂', '男', '1983-03-06', '教授', 7567, '01'),
-  ('0102', '马小红', '女', '1992-12-08', '教授', 5845, '01'),
-  ('0103', '吴宝钢', '男', '1990-11-06', '讲师', 5554, '01'),
-  ('0201', '张心颖', '女', '1970-01-05', '教授', 9200, '02'),
-  ('0104', '周建国', '男', '1981-09-18', '副教授', 6800, '01'),
-  ('0105', '秦晓岚', '女', '1986-04-22', '讲师', 6100, '01'),
-  ('0202', '林海', '男', '1980-07-12', '副教授', 7000, '02'),
-  ('0301', '顾明', '男', '1978-10-30', '教授', 8800, '03'),
-  ('0401', '何静', '女', '1984-05-14', '副教授', 7200, '04'),
-  ('0501', '沈佳怡', '女', '1987-12-02', '讲师', 5900, '05');
+  ('0101', '陈迪茂', '男', '1983-03-06', 1, 7567, '01'),
+  ('0102', '马小红', '女', '1992-12-08', 1, 5845, '01'),
+  ('0103', '吴宝钢', '男', '1990-11-06', 3, 5554, '01'),
+  ('0201', '张心颖', '女', '1970-01-05', 1, 9200, '02'),
+  ('0104', '周建国', '男', '1981-09-18', 2, 6800, '01'),
+  ('0105', '秦晓岚', '女', '1986-04-22', 3, 6100, '01'),
+  ('0202', '林海', '男', '1980-07-12', 2, 7000, '02'),
+  ('0301', '顾明', '男', '1978-10-30', 1, 8800, '03'),
+  ('0401', '何静', '女', '1984-05-14', 2, 7200, '04'),
+  ('0501', '沈佳怡', '女', '1987-12-02', 3, 5900, '05');
 
 INSERT INTO course (course_id, course_name, credit, credit_hours, dept_id)
 VALUES
-  ('08301001', '分子物理学', 4, 40, '03'),
-  ('08302001', '通信学', 3, 30, '02'),
-  ('08305001', '离散数学', 4, 40, '01'),
-  ('08305002', '数据库原理', 4, 50, '01'),
-  ('08305003', '数据结构', 4, 50, '01'),
-  ('08305004', '系统结构', 6, 60, '01'),
+  ('08301001', '分子物理学', 4, 48, '03'),
+  ('08302001', '通信学', 3, 32, '02'),
+  ('08305001', '离散数学', 4, 48, '01'),
+  ('08305002', '数据库原理', 4, 64, '01'),
+  ('08305003', '数据结构', 4, 64, '01'),
+  ('08305004', '系统结构', 6, 64, '01'),
   ('08305005', '操作系统', 4, 48, '01'),
   ('08305006', '计算机网络', 4, 48, '01'),
-  ('08305007', '软件工程', 3, 36, '01'),
-  ('08305008', '人工智能导论', 3, 36, '01'),
-  ('08305009', 'Web应用开发', 3, 40, '01'),
-  ('08302002', '数字信号处理', 3, 36, '02'),
-  ('08302003', '移动通信', 3, 36, '02'),
+  ('08305007', '软件工程', 3, 48, '01'),
+  ('08305008', '人工智能导论', 3, 48, '01'),
+  ('08305009', 'Web应用开发', 3, 48, '01'),
+  ('08302002', '数字信号处理', 3, 48, '02'),
+  ('08302003', '移动通信', 3, 48, '02'),
   ('08301002', '材料力学', 4, 48, '03'),
-  ('08301003', '工程材料学', 3, 36, '03'),
-  ('08306001', '管理学原理', 3, 36, '04'),
-  ('08306002', '会计学基础', 3, 36, '04'),
+  ('08301003', '工程材料学', 3, 48, '03'),
+  ('08306001', '管理学原理', 3, 48, '04'),
+  ('08306002', '会计学基础', 3, 48, '04'),
   ('08307001', '大学英语', 2, 32, '05');
 
 INSERT INTO course_offerings (semester_id, course_id, staff_id, class_time, capacity, status, classroom_building_no, classroom_room_no)
@@ -838,6 +1035,7 @@ SELECT
   co.course_name,
   co.credit,
   co.credit_hours,
+  cho.required_weeks,
   co.dept_id,
   d.dept_name,
   c.staff_id,
@@ -850,13 +1048,14 @@ SELECT
   (c.capacity - COUNT(cs.selection_id)) AS remaining_capacity
 FROM course_offerings AS c
 JOIN course AS co ON co.course_id = c.course_id
+JOIN course_hour_options AS cho ON cho.credit_hours = co.credit_hours
 JOIN department AS d ON d.dept_id = co.dept_id
 JOIN teacher AS t ON t.staff_id = c.staff_id
 LEFT JOIN semesters AS s ON s.semester_id = c.semester_id
 LEFT JOIN course_selection AS cs ON cs.offering_id = c.offering_id
 GROUP BY
   c.offering_id, c.semester_id, s.semester_name, c.course_id, co.course_name,
-  co.credit, co.credit_hours, co.dept_id, d.dept_name, c.staff_id, t.name,
+  co.credit, co.credit_hours, cho.required_weeks, co.dept_id, d.dept_name, c.staff_id, t.name,
   c.class_time, c.classroom_building_no, c.classroom_room_no, c.capacity, c.status;
 
 CREATE OR REPLACE VIEW v_student_timetable AS
@@ -868,6 +1067,8 @@ SELECT
   c.semester_id AS semester,
   co.course_id,
   co.course_name,
+  co.credit_hours,
+  cho.required_weeks,
   t.staff_id,
   t.name AS teacher_name,
   c.class_time,
@@ -876,6 +1077,7 @@ FROM course_selection AS cs
 JOIN student AS st ON st.student_id = cs.student_id
 JOIN course_offerings AS c ON c.offering_id = cs.offering_id
 JOIN course AS co ON co.course_id = c.course_id
+JOIN course_hour_options AS cho ON cho.credit_hours = co.credit_hours
 JOIN teacher AS t ON t.staff_id = c.staff_id;
 
 CREATE OR REPLACE VIEW v_course_grade_summary AS

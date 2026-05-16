@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import type { Request, Response } from 'express';
 import type { RowDataPacket } from 'mysql2';
-import { query } from '../db/mysql';
+import { execute, query } from '../db/mysql';
 import { fail, success } from '../utils/response';
 import type { AuthenticatedRequest, UserRole } from '../types/auth';
 
@@ -108,4 +108,37 @@ export async function login(req: Request, res: Response) {
 
 export async function me(req: AuthenticatedRequest, res: Response) {
   return success(res, req.user || null);
+}
+
+export async function changePassword(req: AuthenticatedRequest, res: Response) {
+  const userId = req.user?.userId;
+  if (!userId) return fail(res, '未登录', 401);
+
+  const oldPassword = String(req.body?.old_password || req.body?.oldPassword || '');
+  const newPassword = String(req.body?.new_password || req.body?.newPassword || '');
+  const fieldErrors: Record<string, string> = {};
+  if (!oldPassword) fieldErrors.old_password = '请输入旧密码';
+  if (!newPassword) fieldErrors.new_password = '请输入新密码';
+  else if (newPassword.length < 6) fieldErrors.new_password = '新密码至少 6 位';
+  if (Object.keys(fieldErrors).length > 0) {
+    return fail(res, '表单校验失败', 400, { fieldErrors });
+  }
+
+  const users = await query<RowDataPacket[]>(
+    'SELECT password_hash FROM users WHERE user_id = ? LIMIT 1',
+    [userId]
+  );
+  const user = users[0];
+  if (!user) return fail(res, '账号不存在', 404);
+
+  const ok = await bcrypt.compare(oldPassword, String(user.password_hash));
+  if (!ok) {
+    return fail(res, '表单校验失败', 400, {
+      fieldErrors: { old_password: '旧密码错误' }
+    });
+  }
+
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  await execute('UPDATE users SET password_hash = ? WHERE user_id = ?', [passwordHash, userId]);
+  return success(res);
 }
