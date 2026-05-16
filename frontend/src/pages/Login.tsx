@@ -9,6 +9,7 @@ interface LoginResult {
   user: CurrentUser;
 }
 
+
 export default function Login() {
   const navigate = useNavigate();
 
@@ -22,16 +23,19 @@ export default function Login() {
 
   return (
     <div className="login-page">
-      <Card className="login-card">
+      <Card className="login-card" bordered={false}>
         <Typography.Title level={2}>教学事务管理系统</Typography.Title>
+        <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', marginBottom: 24, fontSize: 15 }}>
+          欢迎登录，请验证您的身份
+        </Typography.Text>
         <Form layout="vertical" className="login-form" onFinish={onFinish}>
-          <Form.Item name="username" label="账号" rules={[{ required: true, message: '请输入账号' }]}>
-            <Input prefix={<UserOutlined />} placeholder="admin / 学号 / 教工号" />
+          <Form.Item name="username" rules={[{ required: true, message: '请输入账号' }]}>
+            <Input size="large" prefix={<UserOutlined style={{ color: '#94a3b8' }} />} placeholder="账号 (admin / 学号 / 教工号)" />
           </Form.Item>
-          <Form.Item name="password" label="密码" rules={[{ required: true, message: '请输入密码' }]}>
-            <Input.Password prefix={<LockOutlined />} placeholder="默认测试密码 123456" />
+          <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
+            <Input.Password size="large" prefix={<LockOutlined style={{ color: '#94a3b8' }} />} placeholder="密码 (默认测试密码 123456)" />
           </Form.Item>
-          <Button type="primary" htmlType="submit" block>
+          <Button type="primary" htmlType="submit" size="large" block style={{ marginTop: 8 }}>
             登录
           </Button>
         </Form>

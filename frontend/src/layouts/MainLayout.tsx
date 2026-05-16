@@ -1,4 +1,4 @@
-import { LogoutOutlined } from '@ant-design/icons';
+import { LogoutOutlined, ReadOutlined } from '@ant-design/icons';
 import { Button, Form, Input, Layout, Modal, Space, Typography, message } from 'antd';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
@@ -41,6 +41,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     <Layout className="app-shell">
       <Header className="app-header">
         <div className="app-brand">
+          <ReadOutlined style={{ fontSize: 28, color: '#3730a3' }} />
           <Typography.Text className="app-title">教学事务管理系统</Typography.Text>
         </div>
         <Space className="app-user" size={12}>
