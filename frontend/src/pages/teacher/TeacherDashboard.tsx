@@ -85,6 +85,7 @@ export default function TeacherDashboard() {
   const [selectedCourse, setSelectedCourse] = useState<AnyRecord | null>(null);
   const [substitutionCourse, setSubstitutionCourse] = useState<AnyRecord | null>(null);
   const [gradeRecord, setGradeRecord] = useState<AnyRecord | null>(null);
+  const [gradeUploadOpen, setGradeUploadOpen] = useState<boolean | null>(null);
   const [detailMode, setDetailMode] = useState<'students' | 'statistics' | null>(null);
   const [gradeForm] = Form.useForm();
   const [substitutionForm] = Form.useForm();
@@ -114,11 +115,17 @@ export default function TeacherDashboard() {
     setTimetableRows(data);
   };
 
+  const loadGradeUploadWindow = async () => {
+    const data = await request.get<AnyRecord>('/teacher/grade-upload-window');
+    setGradeUploadOpen(Boolean(data.is_open));
+  };
+
   const reloadAll = async () => {
     const current = await loadSemesters();
     await Promise.all([
       loadCourses(courseSemester || current),
-      loadTimetable(scheduleSemester || current, scheduleWeek)
+      loadTimetable(scheduleSemester || current, scheduleWeek),
+      loadGradeUploadWindow()
     ]);
   };
 
@@ -228,11 +235,21 @@ export default function TeacherDashboard() {
   const saveGrade = async () => {
     const values = await gradeForm.validateFields();
     if (!gradeRecord) return;
-    await request.put(`/teacher/grades/${gradeRecord.grade_id}`, values);
-    message.success('成绩已保存');
-    setGradeRecord(null);
-    if (selectedCourse) {
-      await loadStudents(selectedCourse);
+    if (!gradeUploadOpen) {
+      message.warning('管理员尚未开放成绩上传');
+      return;
+    }
+    try {
+      await request.put(`/teacher/grades/${gradeRecord.grade_id}`, values);
+      message.success('成绩已保存');
+      setGradeRecord(null);
+      if (selectedCourse) {
+        await loadStudents(selectedCourse);
+      }
+    } catch (error: any) {
+      const status = error?.response?.status || error?.response?.data?.code;
+      if (status === 403) setGradeUploadOpen(false);
+      throw error;
     }
   };
 
@@ -293,18 +310,23 @@ export default function TeacherDashboard() {
     {
       title: '操作',
       render: (_, record) => (
-        <Button
-          icon={<EditOutlined />}
-          onClick={() => {
-            setGradeRecord(record);
-            gradeForm.setFieldsValue({
-              regular_score: record.regular_score ?? record.score,
-              exam_score: record.exam_score ?? record.score
-            });
-          }}
-        >
-          录入
-        </Button>
+        <Tooltip title={gradeUploadOpen ? undefined : '管理员尚未开放成绩上传'}>
+          <span>
+            <Button
+              icon={<EditOutlined />}
+              disabled={!gradeUploadOpen}
+              onClick={() => {
+                setGradeRecord(record);
+                gradeForm.setFieldsValue({
+                  regular_score: record.regular_score ?? record.score,
+                  exam_score: record.exam_score ?? record.score
+                });
+              }}
+            >
+              录入
+            </Button>
+          </span>
+        </Tooltip>
       )
     }
   ];
@@ -444,6 +466,9 @@ export default function TeacherDashboard() {
                         <Button onClick={() => setStudentKeyword('')}>重置</Button>
                       </Space>
                     </div>
+                    {gradeUploadOpen === false && (
+                      <Alert type="warning" showIcon message="管理员尚未开放成绩上传，当前只能查看名单和已有成绩。" />
+                    )}
                     <Table rowKey="selection_id" columns={studentColumns} dataSource={filteredStudentRows} scroll={{ x: 1000 }} />
                   </div>
                 )}

@@ -18,7 +18,7 @@ mysql -uroot -p < database/00_rebuild_school_from_scratch.sql
 - 触发器：选课后自动创建成绩记录；防止同一开课同一教学周存在重复有效代课申请；防止代课周次超过课程学时对应周数
 - 存储过程：课程成绩统计
 - 视图：开课详情、学生课表、成绩统计、教师授课统计等
-- 默认系统设置：全局选课开关 `course_selection_open = 1`
+- 默认系统设置：全局选课开关 `course_selection_open = 1`，成绩查询开关 `grade_query_open = 0`，成绩上传开关 `grade_upload_open = 0`
 
 默认测试密码都是 `123456`。学生账号格式为 `1xxx`，教师账号格式为 `0xxx`，数据库用检查约束保证两类登录账号不会冲突。管理员新增学生或教师时可以填写初始密码；编辑时可以填写重置密码。数据库只保存 `users.password_hash`，不保存密码明文。
 

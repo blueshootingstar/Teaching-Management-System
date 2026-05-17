@@ -375,7 +375,10 @@ VALUES
   ('201402', '2014学年第二学期', '2015-03-01', '2015-07-10', 1);
 
 INSERT INTO system_settings (setting_key, setting_value)
-VALUES ('course_selection_open', '1');
+VALUES
+  ('course_selection_open', '1'),
+  ('grade_query_open', '0'),
+  ('grade_upload_open', '0');
 
 INSERT INTO student_statuses (status_code, status_name, can_select_course)
 VALUES

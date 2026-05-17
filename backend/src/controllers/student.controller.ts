@@ -1,7 +1,7 @@
 import type { Response } from 'express';
 import type { RowDataPacket } from 'mysql2/promise';
 import { getConnection, query } from '../db/mysql';
-import { courseSelectionWindowPayload, getCourseSelectionOpen } from '../services/systemSettings';
+import { courseSelectionWindowPayload, getCourseSelectionOpen, getGradeQueryOpen } from '../services/systemSettings';
 import type { AuthenticatedRequest } from '../types/auth';
 import { fail, success } from '../utils/response';
 
@@ -411,6 +411,13 @@ export async function timetable(req: AuthenticatedRequest, res: Response) {
 export async function myGrades(req: AuthenticatedRequest, res: Response) {
   const studentId = requireStudentId(req, res);
   if (!studentId) return null;
+
+  const [isGradeQueryOpen, currentSemester] = await Promise.all([
+    getGradeQueryOpen(),
+    getCurrentSemester()
+  ]);
+  const hideCurrentSemester = Boolean(!isGradeQueryOpen && currentSemester);
+
   const rows = await query<RowDataPacket[]>(
     `SELECT
        cs.selection_id, c.semester_id AS semester, co.course_id, co.course_name, co.credit,
@@ -421,8 +428,14 @@ export async function myGrades(req: AuthenticatedRequest, res: Response) {
      JOIN teacher AS t ON t.staff_id = c.staff_id
      LEFT JOIN v_grades AS g ON g.selection_id = cs.selection_id
      WHERE cs.student_id = ?
+       ${hideCurrentSemester ? 'AND c.semester_id <> ?' : ''}
      ORDER BY c.semester_id DESC, co.course_id`,
-    [studentId]
+    hideCurrentSemester ? [studentId, currentSemester] : [studentId]
   );
-  return success(res, rows);
+  return success(res, {
+    rows,
+    grade_query_open: isGradeQueryOpen,
+    current_semester: currentSemester || null,
+    current_semester_hidden: hideCurrentSemester
+  });
 }

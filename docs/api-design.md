@@ -58,6 +58,8 @@
 - `PUT /api/admin/semesters/:id/current`
 - `GET /api/admin/course-selection-window`
 - `PUT /api/admin/course-selection-window`，提交 `is_open` 控制全局选课开关。
+- `GET /api/admin/system-settings`，返回全局选课、成绩查询、成绩上传开关。
+- `PUT /api/admin/system-settings/:key`，提交 `is_open` 控制指定系统开关，`key` 支持 `course_selection_open`、`grade_query_open`、`grade_upload_open`。
 - `GET/POST /api/admin/course-offerings`
 - `PUT/DELETE /api/admin/course-offerings/:id`
 - `GET /api/admin/departments`
@@ -80,13 +82,14 @@
 - `DELETE /api/student/drop-course/:selectionId`，后端强制校验全局开关、学生状态和成绩状态。
 - `GET /api/student/my-courses`
 - `GET /api/student/timetable`，支持 `semester`、`week`，按教学周返回实际授课教师。
-- `GET /api/student/my-grades`
+- `GET /api/student/my-grades`，历史学期成绩始终返回；当前学期成绩仅在管理员开放成绩查询后返回。
 
 `正常` 学生可以选课和退课；`休学`、`毕业` 学生可以登录并查看历史课程、课表、成绩，但不能选课或退课。
 
 ## 教师
 
 - `GET /api/teacher/semesters`
+- `GET /api/teacher/grade-upload-window`，返回教师端成绩上传是否开放。
 - `GET /api/teacher/my-courses`，支持 `semester` 按学期筛选。
 - `GET /api/teacher/timetable`，支持 `semester`、`week`，返回教师某周上课表。
 - `GET /api/teacher/substitute-candidates`，提交 `offeringId`、`week` 查询可代课教师，同时返回该课程该周是否已存在待处理或已同意代课申请。
@@ -94,7 +97,7 @@
 - `POST /api/teacher/substitution-requests/:id/accept`
 - `POST /api/teacher/substitution-requests/:id/reject`
 - `GET /api/teacher/course-students/:courseOfferingId`
-- `PUT /api/teacher/grades/:gradeId`，提交 `regular_score`、`exam_score`，总评成绩由数据库视图计算。
+- `PUT /api/teacher/grades/:gradeId`，管理员开放成绩上传后可提交 `regular_score`、`exam_score`，总评成绩由数据库视图计算。
 - `GET /api/teacher/course-statistics/:courseOfferingId`
 
 教师和学生周课表只返回课程有效上课周数内的数据。代课申请只保存 `offering_id`、`week_no`、目标代课教师和状态。课程名、学期、上课时间、教师名、教室、周数上限等由查询 JOIN 得到。

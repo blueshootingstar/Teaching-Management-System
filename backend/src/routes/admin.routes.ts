@@ -15,6 +15,8 @@ router.get('/course-hour-options', asyncHandler(admin.listCourseHourOptions));
 router.get('/classrooms', asyncHandler(admin.listClassrooms));
 router.get('/course-selection-window', asyncHandler(admin.getCourseSelectionWindow));
 router.put('/course-selection-window', asyncHandler(admin.updateCourseSelectionWindow));
+router.get('/system-settings', asyncHandler(admin.getSystemSettings));
+router.put('/system-settings/:key', asyncHandler(admin.updateSystemSetting));
 router.get('/notifications', asyncHandler(admin.listNotifications));
 router.post('/notifications', asyncHandler(admin.sendNotification));
 router.delete('/notifications/:mailItemId', asyncHandler(admin.deleteNotification));

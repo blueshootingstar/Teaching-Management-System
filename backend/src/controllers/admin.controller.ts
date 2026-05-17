@@ -2,7 +2,14 @@ import bcrypt from 'bcryptjs';
 import type { Request, Response } from 'express';
 import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { execute, getConnection, query } from '../db/mysql';
-import { courseSelectionWindowPayload, getCourseSelectionOpen, setCourseSelectionOpen } from '../services/systemSettings';
+import {
+  courseSelectionWindowPayload,
+  getCourseSelectionOpen,
+  getSystemWindows,
+  isSystemWindowKey,
+  setBooleanSetting,
+  setCourseSelectionOpen
+} from '../services/systemSettings';
 import type { AuthenticatedRequest } from '../types/auth';
 import { fail, success } from '../utils/response';
 
@@ -418,6 +425,23 @@ export async function updateCourseSelectionWindow(req: Request, res: Response) {
   const isOpen = req.body?.is_open === true || req.body?.is_open === 1 || req.body?.is_open === '1';
   await setCourseSelectionOpen(isOpen);
   return success(res, courseSelectionWindowPayload(isOpen));
+}
+
+export async function getSystemSettings(_req: Request, res: Response) {
+  const windows = await getSystemWindows();
+  return success(res, windows);
+}
+
+export async function updateSystemSetting(req: Request, res: Response) {
+  const key = String(req.params.key || '').trim();
+  if (!isSystemWindowKey(key)) {
+    return fail(res, '未知系统开关', 404);
+  }
+
+  const isOpen = req.body?.is_open === true || req.body?.is_open === 1 || req.body?.is_open === '1';
+  await setBooleanSetting(key, isOpen);
+  const windows = await getSystemWindows();
+  return success(res, windows);
 }
 
 export async function sendNotification(req: AuthenticatedRequest, res: Response) {

@@ -268,8 +268,8 @@ teacher 1--N substitution_requests
 
 关键字段：
 
-- `setting_key`：设置键，主键，例如 `course_selection_open`。
-- `setting_value`：设置值，当前选课开关使用 `1` 表示开放、`0` 表示关闭。
+- `setting_key`：设置键，主键，例如 `course_selection_open`、`grade_query_open`、`grade_upload_open`。
+- `setting_value`：设置值，当前系统开关使用 `1` 表示开放、`0` 表示关闭。
 
 约束与索引：
 
@@ -277,7 +277,7 @@ teacher 1--N substitution_requests
 
 系统使用：
 
-- 管理员通过该表控制全局选课开放状态。
+- 管理员通过该表控制全局选课、当前学期成绩查询和成绩上传开放状态。
 - 学生端读取选课开放状态，关闭时不展示可选课程列表。
 - 后端选课和退课接口都会检查该开关。
 

@@ -1,6 +1,7 @@
 import type { Response } from 'express';
 import type { PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { execute, getConnection, query } from '../db/mysql';
+import { getGradeUploadOpen } from '../services/systemSettings';
 import type { AuthenticatedRequest } from '../types/auth';
 import { fail, success } from '../utils/response';
 
@@ -115,6 +116,14 @@ export async function semesters(req: AuthenticatedRequest, res: Response) {
      ORDER BY semester_id DESC`
   );
   return success(res, rows);
+}
+
+export async function gradeUploadWindow(req: AuthenticatedRequest, res: Response) {
+  const staffId = requireStaffId(req, res);
+  if (!staffId) return null;
+
+  const isOpen = await getGradeUploadOpen();
+  return success(res, { is_open: isOpen });
 }
 
 export async function myCourses(req: AuthenticatedRequest, res: Response) {
@@ -520,6 +529,12 @@ export async function courseStudents(req: AuthenticatedRequest, res: Response) {
 export async function updateGrade(req: AuthenticatedRequest, res: Response) {
   const staffId = requireStaffId(req, res);
   if (!staffId) return null;
+
+  const isGradeUploadOpen = await getGradeUploadOpen();
+  if (!isGradeUploadOpen) {
+    return fail(res, '管理员尚未开放成绩上传', 403);
+  }
+
   const regularScore = Number(req.body.regular_score);
   const examScore = Number(req.body.exam_score);
   if (!isValidScore(regularScore) || !isValidScore(examScore)) {

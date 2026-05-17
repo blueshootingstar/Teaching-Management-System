@@ -41,6 +41,7 @@ export default function StudentDashboard() {
   const [courseRows, setCourseRows] = useState<AnyRecord[]>([]);
   const [timetableRows, setTimetableRows] = useState<AnyRecord[]>([]);
   const [gradeRows, setGradeRows] = useState<AnyRecord[]>([]);
+  const [gradeQueryMessage, setGradeQueryMessage] = useState<string | null>(null);
   const [currentSemesterId, setCurrentSemesterId] = useState<string>();
   const [courseSemester, setCourseSemester] = useState<string>();
   const [courseWeek, setCourseWeek] = useState(1);
@@ -99,8 +100,19 @@ export default function StudentDashboard() {
   };
 
   const loadGrades = async () => {
-    const data = await request.get<AnyRecord[]>('/student/my-grades');
-    setGradeRows(data);
+    const data = await request.get<AnyRecord[] | AnyRecord>('/student/my-grades');
+    if (Array.isArray(data)) {
+      setGradeRows(data);
+      setGradeQueryMessage(null);
+      return;
+    }
+
+    setGradeRows(data.rows || []);
+    setGradeQueryMessage(
+      data.current_semester_hidden
+        ? '当前学期成绩查询暂未开放，已隐藏当前学期成绩。历史学期成绩可正常查看。'
+        : null
+    );
   };
 
   const reloadAll = async () => {
@@ -487,6 +499,9 @@ export default function StudentDashboard() {
                   <Button icon={<ReloadOutlined />} onClick={loadGrades} />
                 </Space>
               </div>
+              {gradeQueryMessage && (
+                <Alert type="warning" showIcon message={gradeQueryMessage} />
+              )}
               <Typography.Title level={5}>近 5 学期平均绩点走势</Typography.Title>
               <GpaTrendChart
                 labels={gpaTrend.labels}

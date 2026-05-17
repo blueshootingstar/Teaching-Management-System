@@ -41,6 +41,51 @@ interface ResourceConfig {
   fields: FieldConfig[];
 }
 
+type SystemWindowKey = 'course_selection_open' | 'grade_query_open' | 'grade_upload_open';
+type SystemWindows = Record<SystemWindowKey, boolean | null>;
+
+const systemWindowControls: Array<{
+  key: SystemWindowKey;
+  label: string;
+  openText: string;
+  closedText: string;
+  openButton: string;
+  closeButton: string;
+  openConfirm: string;
+  closeConfirm: string;
+}> = [
+  {
+    key: 'course_selection_open',
+    label: '选课',
+    openText: '选课开放中',
+    closedText: '选课已关闭',
+    openButton: '开启选课',
+    closeButton: '关闭选课',
+    openConfirm: '开启后学生可以进行选课和退课操作。',
+    closeConfirm: '关闭后学生将不能继续选课或退课。'
+  },
+  {
+    key: 'grade_query_open',
+    label: '成绩查询',
+    openText: '成绩查询开放中',
+    closedText: '成绩查询已关闭',
+    openButton: '开启成绩查询',
+    closeButton: '关闭成绩查询',
+    openConfirm: '开启后学生可以查看当前学期成绩和绩点。',
+    closeConfirm: '关闭后学生将不能查看当前学期成绩，历史学期成绩仍可查看。'
+  },
+  {
+    key: 'grade_upload_open',
+    label: '成绩上传',
+    openText: '成绩上传开放中',
+    closedText: '成绩上传已关闭',
+    openButton: '开启成绩上传',
+    closeButton: '关闭成绩上传',
+    openConfirm: '开启后教师可以录入或修改学生成绩。',
+    closeConfirm: '关闭后教师将不能录入或修改学生成绩。'
+  }
+];
+
 function formatDate(value: unknown) {
   if (!value) return '-';
   return String(value).slice(0, 10);
@@ -129,15 +174,20 @@ function requiredMessage(field: FieldConfig) {
 interface ResourcePanelProps {
   config: ResourceConfig;
   onChanged?: () => void | Promise<void>;
-  selectionWindowOpen?: boolean | null;
-  onToggleSelectionWindow?: (isOpen: boolean) => void | Promise<void>;
+  systemWindows?: SystemWindows;
+  onToggleSystemWindow?: (key: SystemWindowKey, isOpen: boolean) => void | Promise<void>;
 }
 
-function ResourcePanel({ config, onChanged, selectionWindowOpen, onToggleSelectionWindow }: ResourcePanelProps) {
+function ResourcePanel({ config, onChanged, systemWindows, onToggleSystemWindow }: ResourcePanelProps) {
   const [rows, setRows] = useState<AnyRecord[]>([]);
   const [keyword, setKeyword] = useState('');
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<AnyRecord | null>(null);
+  const [confirmingWindow, setConfirmingWindow] = useState<{
+    control: (typeof systemWindowControls)[number];
+    nextOpen: boolean;
+  } | null>(null);
+  const [systemWindowSaving, setSystemWindowSaving] = useState(false);
   const [form] = Form.useForm();
   const selectedClassroom = Form.useWatch('classroom', form);
   const classroomOptions = config.fields.find((field) => field.name === 'classroom')?.options || [];
@@ -236,8 +286,21 @@ function ResourcePanel({ config, onChanged, selectionWindowOpen, onToggleSelecti
     await reloadAfterChange();
   };
 
-  const toggleCourseSelectionWindow = async () => {
-    await onToggleSelectionWindow?.(!selectionWindowOpen);
+  const confirmSystemWindowToggle = (control: (typeof systemWindowControls)[number]) => {
+    const current = systemWindows?.[control.key];
+    if (current === null || current === undefined) return;
+    setConfirmingWindow({ control, nextOpen: !current });
+  };
+
+  const submitSystemWindowToggle = async () => {
+    if (!confirmingWindow) return;
+    setSystemWindowSaving(true);
+    try {
+      await onToggleSystemWindow?.(confirmingWindow.control.key, confirmingWindow.nextOpen);
+      setConfirmingWindow(null);
+    } finally {
+      setSystemWindowSaving(false);
+    }
   };
 
   const canEdit = config.key !== 'semesters';
@@ -300,12 +363,19 @@ function ResourcePanel({ config, onChanged, selectionWindowOpen, onToggleSelecti
         <Space wrap>
           {config.key === 'semesters' && (
             <>
-              <Tag color={selectionWindowOpen ? 'green' : selectionWindowOpen === false ? 'red' : 'default'}>
-                {selectionWindowOpen === null ? '读取选课状态' : selectionWindowOpen ? '选课开放中' : '选课已关闭'}
-              </Tag>
-              <Button danger={!!selectionWindowOpen} disabled={selectionWindowOpen === null} onClick={toggleCourseSelectionWindow}>
-                {selectionWindowOpen ? '关闭选课' : '开启选课'}
-              </Button>
+              {systemWindowControls.map((control) => {
+                const isOpen = systemWindows?.[control.key];
+                return (
+                  <Space key={control.key} size={4}>
+                    <Tag color={isOpen ? 'green' : isOpen === false ? 'red' : 'default'}>
+                      {isOpen === null || isOpen === undefined ? `读取${control.label}状态` : isOpen ? control.openText : control.closedText}
+                    </Tag>
+                    <Button danger={!!isOpen} disabled={isOpen === null || isOpen === undefined} onClick={() => confirmSystemWindowToggle(control)}>
+                      {isOpen ? control.closeButton : control.openButton}
+                    </Button>
+                  </Space>
+                );
+              })}
             </>
           )}
           <Input.Search allowClear placeholder={`搜索${config.title}`} value={keyword} onChange={(event) => setKeyword(event.target.value)} style={{ width: 280 }} />
@@ -367,6 +437,24 @@ function ResourcePanel({ config, onChanged, selectionWindowOpen, onToggleSelecti
             </Form.Item>
           ))}
         </Form>
+      </Modal>
+      <Modal
+        title={confirmingWindow ? `确认${confirmingWindow.nextOpen ? confirmingWindow.control.openButton : confirmingWindow.control.closeButton}？` : ''}
+        open={!!confirmingWindow}
+        onOk={submitSystemWindowToggle}
+        onCancel={() => setConfirmingWindow(null)}
+        okText={confirmingWindow?.nextOpen ? '确认开启' : '确认关闭'}
+        cancelText="取消"
+        confirmLoading={systemWindowSaving}
+        okButtonProps={{ danger: confirmingWindow ? !confirmingWindow.nextOpen : false }}
+      >
+        <Typography.Text>
+          {confirmingWindow
+            ? confirmingWindow.nextOpen
+              ? confirmingWindow.control.openConfirm
+              : confirmingWindow.control.closeConfirm
+            : ''}
+        </Typography.Text>
       </Modal>
     </div>
   );
@@ -594,7 +682,11 @@ export default function AdminDashboard() {
   const [studentStatuses, setStudentStatuses] = useState<AnyRecord[]>([]);
   const [professionalRanks, setProfessionalRanks] = useState<AnyRecord[]>([]);
   const [courseHourOptions, setCourseHourOptions] = useState<AnyRecord[]>([]);
-  const [selectionWindowOpen, setSelectionWindowOpen] = useState<boolean | null>(null);
+  const [systemWindows, setSystemWindows] = useState<SystemWindows>({
+    course_selection_open: null,
+    grade_query_open: null,
+    grade_upload_open: null
+  });
 
   const loadOptions = async () => {
     const [
@@ -606,7 +698,7 @@ export default function AdminDashboard() {
       statusData,
       rankData,
       courseHourData,
-      selectionWindowData
+      systemSettingsData
     ] = await Promise.all([
       request.get<AnyRecord[]>('/admin/departments'),
       request.get<AnyRecord[]>('/admin/courses'),
@@ -616,7 +708,7 @@ export default function AdminDashboard() {
       request.get<AnyRecord[]>('/admin/student-statuses'),
       request.get<AnyRecord[]>('/admin/professional-ranks'),
       request.get<AnyRecord[]>('/admin/course-hour-options'),
-      request.get<AnyRecord>('/admin/course-selection-window')
+      request.get<AnyRecord>('/admin/system-settings')
     ]);
     setDepartments(deptData);
     setCourses(courseData);
@@ -626,7 +718,11 @@ export default function AdminDashboard() {
     setStudentStatuses(statusData);
     setProfessionalRanks(rankData);
     setCourseHourOptions(courseHourData);
-    setSelectionWindowOpen(Boolean(selectionWindowData.is_open));
+    setSystemWindows({
+      course_selection_open: Boolean(systemSettingsData.course_selection_open),
+      grade_query_open: Boolean(systemSettingsData.grade_query_open),
+      grade_upload_open: Boolean(systemSettingsData.grade_upload_open)
+    });
   };
 
   useEffect(() => {
@@ -649,10 +745,15 @@ export default function AdminDashboard() {
     capacity: Number(item.capacity)
   }));
 
-  const toggleCourseSelectionWindow = async (isOpen: boolean) => {
-    const data = await request.put<AnyRecord>('/admin/course-selection-window', { is_open: isOpen });
-    setSelectionWindowOpen(Boolean(data.is_open));
-    message.success(isOpen ? '已开启选课' : '已关闭选课');
+  const toggleSystemWindow = async (key: SystemWindowKey, isOpen: boolean) => {
+    const data = await request.put<AnyRecord>(`/admin/system-settings/${key}`, { is_open: isOpen });
+    setSystemWindows({
+      course_selection_open: Boolean(data.course_selection_open),
+      grade_query_open: Boolean(data.grade_query_open),
+      grade_upload_open: Boolean(data.grade_upload_open)
+    });
+    const label = systemWindowControls.find((item) => item.key === key)?.label || '功能';
+    message.success(isOpen ? `已开启${label}` : `已关闭${label}`);
   };
 
   const resources = useMemo<ResourceConfig[]>(
@@ -778,8 +879,8 @@ export default function AdminDashboard() {
             <ResourcePanel
               config={resource}
               onChanged={loadOptions}
-              selectionWindowOpen={selectionWindowOpen}
-              onToggleSelectionWindow={toggleCourseSelectionWindow}
+              systemWindows={systemWindows}
+              onToggleSystemWindow={toggleSystemWindow}
             />
           )
         })),
