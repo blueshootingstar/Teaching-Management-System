@@ -99,7 +99,7 @@ teacher 1--N substitution_requests
 
 关键字段：
 
-- `student_id`：学号，主键，例如 `1102`。
+- `student_id`：学号，主键，格式为 `1` 开头的 4 位数字，例如 `1102`。
 - `name`：学生姓名。
 - `sex`：性别，枚举 `男` / `女`。
 - `date_of_birth`：出生日期。
@@ -111,6 +111,7 @@ teacher 1--N substitution_requests
 约束与索引：
 
 - 主键：`student_id`。
+- 检查约束：`student_id` 必须匹配 `^1[0-9]{3}$`。
 - 外键：`dept_id` 引用 `department.dept_id`。
 - 外键：`status_code` 引用 `student_statuses.status_code`。
 - 索引：`dept_id, name`，便于按院系和姓名查询。
@@ -143,7 +144,7 @@ teacher 1--N substitution_requests
 
 关键字段：
 
-- `staff_id`：教工号，主键，例如 `0101`。
+- `staff_id`：教工号，主键，格式为 `0` 开头的 4 位数字，例如 `0101`。
 - `name`：教师姓名。
 - `sex`：性别。
 - `date_of_birth`：出生日期。
@@ -154,6 +155,7 @@ teacher 1--N substitution_requests
 约束与索引：
 
 - 主键：`staff_id`。
+- 检查约束：`staff_id` 必须匹配 `^0[0-9]{3}$`。
 - 外键：`dept_id` 引用 `department.dept_id`。
 - 外键：`professional_rank_id` 引用 `professional_ranks.rank_id`。
 - 索引：`dept_id`。
@@ -440,6 +442,7 @@ teacher 1--N substitution_requests
 系统使用：
 
 - 登录接口先按输入账号匹配管理员用户名、学生学号或教师教工号。
+- 学生学号固定为 `1xxx`，教师教工号固定为 `0xxx`，两类账号格式互斥，避免单账号框登录时身份歧义。
 - 使用 `users.password_hash` 校验密码。
 - 管理员新增学生或教师时可以填写初始密码；不填则使用默认密码 `123456`。
 - 管理员编辑学生或教师时可以填写重置密码；不填则保持原密码。

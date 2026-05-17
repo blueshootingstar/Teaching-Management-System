@@ -51,6 +51,9 @@ const sexOptions = [
   { label: '女', value: '女' }
 ];
 
+const studentIdPattern = /^1\d{3}$/;
+const teacherIdPattern = /^0\d{3}$/;
+
 const offeringStatusOptions = [
   { label: '开放', value: 'open' },
   { label: '关闭', value: 'closed' }
@@ -155,6 +158,12 @@ function ResourcePanel({ config, onChanged, selectionWindowOpen, onToggleSelecti
           return Promise.resolve();
         }
       });
+    }
+    if (field.name === 'student_id') {
+      rules.push({ pattern: studentIdPattern, message: '学号需为 1 开头的 4 位数字' });
+    }
+    if (field.name === 'staff_id') {
+      rules.push({ pattern: teacherIdPattern, message: '教工号需为 0 开头的 4 位数字' });
     }
     return rules.length > 0 ? rules : undefined;
   };
@@ -662,7 +671,7 @@ export default function AdminDashboard() {
           { title: '状态', dataIndex: 'status_name' }
         ],
         fields: [
-          { name: 'student_id', label: '学号', required: true, placeholder: '例如 1102（4位）' },
+          { name: 'student_id', label: '学号', required: true, placeholder: '例如 1102（1开头4位数字）' },
           { name: 'name', label: '姓名', required: true, placeholder: '例如 张三' },
           { name: 'sex', label: '性别', type: 'select', options: sexOptions, required: true, placeholder: '请选择性别' },
           { name: 'date_of_birth', label: '出生日期', type: 'date', required: true, placeholder: '请选择出生日期' },
@@ -686,7 +695,7 @@ export default function AdminDashboard() {
           { title: '薪资', dataIndex: 'salary' }
         ],
         fields: [
-          { name: 'staff_id', label: '教工号', required: true, placeholder: '例如 0106（4位）' },
+          { name: 'staff_id', label: '教工号', required: true, placeholder: '例如 0106（0开头4位数字）' },
           { name: 'name', label: '姓名', required: true, placeholder: '例如 李老师' },
           { name: 'sex', label: '性别', type: 'select', options: sexOptions, required: true, placeholder: '请选择性别' },
           { name: 'date_of_birth', label: '出生日期', type: 'date', required: true, placeholder: '请选择出生日期' },

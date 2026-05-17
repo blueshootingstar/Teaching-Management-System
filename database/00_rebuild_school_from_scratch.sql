@@ -78,7 +78,8 @@ CREATE TABLE student (
   KEY idx_student_dept_name (dept_id, name DESC),
   KEY idx_student_status (status_code),
   CONSTRAINT fk_student_department FOREIGN KEY (dept_id) REFERENCES department (dept_id),
-  CONSTRAINT fk_student_status FOREIGN KEY (status_code) REFERENCES student_statuses (status_code)
+  CONSTRAINT fk_student_status FOREIGN KEY (status_code) REFERENCES student_statuses (status_code),
+  CONSTRAINT chk_student_id_format CHECK (student_id REGEXP '^1[0-9]{3}$')
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE teacher (
@@ -93,7 +94,8 @@ CREATE TABLE teacher (
   KEY idx_teacher_dept (dept_id),
   KEY idx_teacher_rank (professional_rank_id),
   CONSTRAINT fk_teacher_department FOREIGN KEY (dept_id) REFERENCES department (dept_id),
-  CONSTRAINT fk_teacher_professional_rank FOREIGN KEY (professional_rank_id) REFERENCES professional_ranks (rank_id)
+  CONSTRAINT fk_teacher_professional_rank FOREIGN KEY (professional_rank_id) REFERENCES professional_ranks (rank_id),
+  CONSTRAINT chk_teacher_id_format CHECK (staff_id REGEXP '^0[0-9]{3}$')
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE course (

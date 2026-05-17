@@ -30,7 +30,7 @@ export default function Login() {
         </Typography.Text>
         <Form layout="vertical" className="login-form" onFinish={onFinish}>
           <Form.Item name="username" rules={[{ required: true, message: '请输入账号' }]}>
-            <Input size="large" prefix={<UserOutlined style={{ color: '#94a3b8' }} />} placeholder="账号 (admin / 学号 / 教工号)" />
+            <Input size="large" prefix={<UserOutlined style={{ color: '#94a3b8' }} />} placeholder="账号 (admin / 学号1xxx / 教工号0xxx)" />
           </Form.Item>
           <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
             <Input.Password size="large" prefix={<LockOutlined style={{ color: '#94a3b8' }} />} placeholder="密码 (默认测试密码 123456)" />

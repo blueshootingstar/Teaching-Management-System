@@ -9,6 +9,8 @@ import { fail, success } from '../utils/response';
 const DEFAULT_PASSWORD = '123456';
 const OFFERING_STATUS_VALUES = new Set(['open', 'closed']);
 const SEX_VALUES = new Set(['男', '女']);
+const STUDENT_ID_PATTERN = /^1\d{3}$/;
+const TEACHER_ID_PATTERN = /^0\d{3}$/;
 
 type FieldErrors = Record<string, string>;
 
@@ -164,6 +166,23 @@ function courseOfferingDuplicateFieldErrors(error: unknown): FieldErrors | null 
   return null;
 }
 
+function identityFormatFieldErrors(error: unknown): FieldErrors | null {
+  const maybeMysqlError = error as { code?: string; message?: string };
+  const message = String(maybeMysqlError?.message || '');
+
+  if (maybeMysqlError?.code !== 'ER_CHECK_CONSTRAINT_VIOLATED' && !message.includes('chk_')) {
+    return null;
+  }
+  if (message.includes('chk_student_id_format')) {
+    return { student_id: '学号需为 1 开头的 4 位数字' };
+  }
+  if (message.includes('chk_teacher_id_format')) {
+    return { staff_id: '教工号需为 0 开头的 4 位数字' };
+  }
+
+  return null;
+}
+
 async function upsertUser(
   conn: PoolConnection,
   role: 'student' | 'teacher',
@@ -239,7 +258,7 @@ async function validateStudentPayload(body: any, mode: 'create' | 'update', curr
   const fieldErrors: FieldErrors = {};
 
   if (!payload.student_id) fieldErrors.student_id = '请输入学号';
-  else if (!/^\d{4}$/.test(payload.student_id)) fieldErrors.student_id = '学号需为 4 位数字';
+  else if (!STUDENT_ID_PATTERN.test(payload.student_id)) fieldErrors.student_id = '学号需为 1 开头的 4 位数字';
   else if (mode === 'create' && await existsInTable('student', 'student_id', payload.student_id)) {
     fieldErrors.student_id = '学号已存在';
   }
@@ -287,7 +306,7 @@ async function validateTeacherPayload(body: any, mode: 'create' | 'update', curr
   const fieldErrors: FieldErrors = {};
 
   if (!payload.staff_id) fieldErrors.staff_id = '请输入教工号';
-  else if (!/^\d{4}$/.test(payload.staff_id)) fieldErrors.staff_id = '教工号需为 4 位数字';
+  else if (!TEACHER_ID_PATTERN.test(payload.staff_id)) fieldErrors.staff_id = '教工号需为 0 开头的 4 位数字';
   else if (mode === 'create' && await existsInTable('teacher', 'staff_id', payload.staff_id)) {
     fieldErrors.staff_id = '教工号已存在';
   }
@@ -547,6 +566,8 @@ export async function createStudent(req: Request, res: Response) {
     return success(res, null, 'created', 201);
   } catch (error) {
     await conn.rollback();
+    const fieldErrors = identityFormatFieldErrors(error);
+    if (fieldErrors) return failFieldErrors(res, fieldErrors);
     throw error;
   } finally {
     conn.release();
@@ -585,6 +606,8 @@ export async function updateStudent(req: Request, res: Response) {
     return success(res);
   } catch (error) {
     await conn.rollback();
+    const fieldErrors = identityFormatFieldErrors(error);
+    if (fieldErrors) return failFieldErrors(res, fieldErrors);
     throw error;
   } finally {
     conn.release();
@@ -684,6 +707,8 @@ export async function createTeacher(req: Request, res: Response) {
     return success(res, null, 'created', 201);
   } catch (error) {
     await conn.rollback();
+    const fieldErrors = identityFormatFieldErrors(error);
+    if (fieldErrors) return failFieldErrors(res, fieldErrors);
     throw error;
   } finally {
     conn.release();
@@ -721,6 +746,8 @@ export async function updateTeacher(req: Request, res: Response) {
     return success(res);
   } catch (error) {
     await conn.rollback();
+    const fieldErrors = identityFormatFieldErrors(error);
+    if (fieldErrors) return failFieldErrors(res, fieldErrors);
     throw error;
   } finally {
     conn.release();

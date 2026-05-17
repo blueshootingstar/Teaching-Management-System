@@ -20,6 +20,6 @@ mysql -uroot -p < database/00_rebuild_school_from_scratch.sql
 - 视图：开课详情、学生课表、成绩统计、教师授课统计等
 - 默认系统设置：全局选课开关 `course_selection_open = 1`
 
-默认测试密码都是 `123456`。管理员新增学生或教师时可以填写初始密码；编辑时可以填写重置密码。数据库只保存 `users.password_hash`，不保存密码明文。
+默认测试密码都是 `123456`。学生账号格式为 `1xxx`，教师账号格式为 `0xxx`，数据库用检查约束保证两类登录账号不会冲突。管理员新增学生或教师时可以填写初始密码；编辑时可以填写重置密码。数据库只保存 `users.password_hash`，不保存密码明文。
 
 当前脚本按 3NF 收口：学生表只保存 `status_code`，选课资格来自 `student_statuses.can_select_course`；教师表只保存 `professional_rank_id`，职称名称来自 `professional_ranks`；课程表只保存固定 `credit_hours`，上课周数来自 `course_hour_options.required_weeks`；信箱不保存 `message_type`、课程名、教师名、教室展示名等可推导字段。

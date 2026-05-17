@@ -43,7 +43,7 @@
 - `GET /api/auth/me`
 - `PUT /api/auth/password`，提交 `old_password`、`new_password` 修改当前用户密码。
 
-登录成功后返回 JWT，前端在后续请求中使用 `Authorization: Bearer <token>`。密码只保存 bcrypt hash，不保存明文。
+登录成功后返回 JWT，前端在后续请求中使用 `Authorization: Bearer <token>`。学生账号为 `1xxx` 学号，教师账号为 `0xxx` 教工号，两类账号格式互斥。密码只保存 bcrypt hash，不保存明文。
 
 ## 管理员
 
@@ -69,7 +69,7 @@
 - `GET /api/admin/notifications`，返回全部通知历史，含发送人、`recipient_count`、`read_count` 查询聚合值。
 - `DELETE /api/admin/notifications/:mailItemId`，任意管理员可删除任意通知，并通过外键级联删除收件人的对应信箱记录。
 
-新增或编辑学生时，接口使用 `status_code`，可选提交 `password` 作为初始密码或重置密码。新增或编辑教师时，接口使用 `professional_rank_id`，也可选提交 `password`。新增或编辑课程时，`credit_hours` 必须来自固定学时选项，接口返回的 `required_weeks` 是 JOIN 得到的展示值。空密码表示使用默认密码或保持原密码。
+新增或编辑学生时，接口使用 `status_code`，`student_id` 必须是 `1` 开头的 4 位数字，可选提交 `password` 作为初始密码或重置密码。新增或编辑教师时，接口使用 `professional_rank_id`，`staff_id` 必须是 `0` 开头的 4 位数字，也可选提交 `password`。新增或编辑课程时，`credit_hours` 必须来自固定学时选项，接口返回的 `required_weeks` 是 JOIN 得到的展示值。空密码表示使用默认密码或保持原密码。
 
 ## 学生
 
