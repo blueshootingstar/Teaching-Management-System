@@ -245,11 +245,24 @@ export default function StudentDashboard() {
         if (Number(record.remaining_capacity || 0) <= 0) {
           return <Button disabled>已满</Button>;
         }
-        return (
+        const selectButton = (
           <Button type="primary" icon={<SelectOutlined />} onClick={() => selectCourse(record.offering_id)}>
             选课
           </Button>
         );
+        if (Number(record.is_cross_department) === 1) {
+          return (
+            <Popconfirm
+              title={`是否选择非自身学院的课程（${record.course_dept_name || '未知学院'}）`}
+              onConfirm={() => selectCourse(record.offering_id)}
+            >
+              <Button type="primary" icon={<SelectOutlined />}>
+                选课
+              </Button>
+            </Popconfirm>
+          );
+        }
+        return selectButton;
       }
     }
   ];
@@ -263,6 +276,15 @@ export default function StudentDashboard() {
     { title: '教师', dataIndex: 'teacher_name' },
     { title: '时间', dataIndex: 'class_time' },
     { title: '教室', dataIndex: 'classroom' },
+    {
+      title: '成绩',
+      dataIndex: 'score',
+      render: (score) => {
+        if (score === null || score === undefined) return <Tag>待录入</Tag>;
+        const value = Number(score);
+        return value < 60 ? <Tag color="red">{value} 不及格</Tag> : <Tag color="green">{value}</Tag>;
+      }
+    },
     {
       title: '操作',
       render: (_, record) => {
@@ -331,9 +353,31 @@ export default function StudentDashboard() {
     ...semesterOptions,
     { label: '全部学期', value: 'all' }
   ];
-  const visibleGrades = gradeSemester === 'all'
+  const failedCourses = courseRows.filter((item) => Number(item.is_failed) === 1 || (
+    item.score !== null && item.score !== undefined && Number(item.score) < 60
+  ));
+  const visibleGrades = (gradeSemester === 'all'
     ? gradeRows
-    : gradeRows.filter((item) => item.semester === gradeSemester);
+    : gradeRows.filter((item) => item.semester === gradeSemester)
+  ).slice().sort((a, b) => Number(isFailedGrade(b)) - Number(isFailedGrade(a)));
+  const unresolvedFailedGrades = useMemo(() => {
+    const passedCourseIds = new Set(
+      gradeRows
+        .filter((item) => item.score !== null && item.score !== undefined && Number(item.score) >= 60)
+        .map((item) => String(item.course_id))
+    );
+    const failedByCourse = new Map<string, AnyRecord>();
+    for (const item of gradeRows) {
+      if (!isFailedGrade(item)) continue;
+      const courseId = String(item.course_id);
+      if (passedCourseIds.has(courseId)) continue;
+      const existing = failedByCourse.get(courseId);
+      if (!existing || String(item.semester) > String(existing.semester)) {
+        failedByCourse.set(courseId, item);
+      }
+    }
+    return Array.from(failedByCourse.values());
+  }, [gradeRows]);
   const overallGpa = calculateWeightedGpa(gradeRows);
   const semesterGpa = calculateWeightedGpa(visibleGrades);
   const finishedCredits = visibleGrades
@@ -360,6 +404,17 @@ export default function StudentDashboard() {
               <div className="toolbar">
                 <Typography.Title level={4}>当前学期课程查询</Typography.Title>
               </div>
+              {unresolvedFailedGrades.length > 0 && (
+                <Alert
+                  type="error"
+                  showIcon
+                  message="存在尚未及格的历史课程："
+                  description={unresolvedFailedGrades
+                    .map((course) => `${course.course_name}（${course.course_id}）`)
+                    .join('、')}
+                  style={{ marginBottom: 16 }}
+                />
+              )}
               {selectionWindowOpen === null ? (
                 <Alert type="info" showIcon message="正在读取选课状态" />
               ) : selectionBlockedReason ? (
@@ -467,6 +522,17 @@ export default function StudentDashboard() {
               </div>
               <div className="page-card">
                 <Typography.Title level={4}>当前学期已选课程</Typography.Title>
+                {failedCourses.length > 0 && (
+                  <Alert
+                    type="error"
+                    showIcon
+                    message="存在已出成绩且不及格的课程"
+                    description={failedCourses
+                      .map((course) => `${course.course_name}（${course.score} 分）`)
+                      .join('、')}
+                    style={{ marginBottom: 16 }}
+                  />
+                )}
                 <Table rowKey="selection_id" columns={courseColumns} dataSource={courseRows} scroll={{ x: 1000 }} />
               </div>
             </Space>
@@ -541,6 +607,10 @@ function calculateWeightedGpa(rows: AnyRecord[]) {
 function normalizeCredit(value: unknown) {
   const credit = Number(value || 0);
   return Number.isFinite(credit) && credit > 0 ? credit : 0;
+}
+
+function isFailedGrade(row: AnyRecord) {
+  return row.score !== null && row.score !== undefined && Number(row.score) < 60;
 }
 
 function buildTimetable(rows: AnyRecord[]) {

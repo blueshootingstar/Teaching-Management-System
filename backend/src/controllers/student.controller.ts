@@ -116,6 +116,11 @@ export async function availableCourses(req: AuthenticatedRequest, res: Response)
     `SELECT
        c.offering_id, c.semester_id AS semester, co.course_id, co.course_name, co.credit, co.credit_hours,
        cho.required_weeks,
+       co.dept_id AS course_dept_id,
+       course_dept.dept_name AS course_dept_name,
+       current_student.dept_id AS student_dept_id,
+       student_dept.dept_name AS student_dept_name,
+       IF(co.dept_id <> current_student.dept_id, 1, 0) AS is_cross_department,
        c.staff_id, t.name AS teacher_name, c.class_time,
        CONCAT(c.classroom_building_no, c.classroom_room_no) AS classroom,
        c.capacity, c.status,
@@ -138,8 +143,11 @@ export async function availableCourses(req: AuthenticatedRequest, res: Response)
        END AS conflict_reason
       FROM course_offerings AS c
       JOIN course AS co ON co.course_id = c.course_id
+      JOIN department AS course_dept ON course_dept.dept_id = co.dept_id
       JOIN course_hour_options AS cho ON cho.credit_hours = co.credit_hours
       JOIN teacher AS t ON t.staff_id = c.staff_id
+      JOIN student AS current_student ON current_student.student_id = ?
+      JOIN department AS student_dept ON student_dept.dept_id = current_student.dept_id
      LEFT JOIN course_selection AS cs
        ON cs.offering_id = c.offering_id
      LEFT JOIN course_selection AS mine
@@ -165,10 +173,11 @@ export async function availableCourses(req: AuthenticatedRequest, res: Response)
       LEFT JOIN teacher AS time_teacher ON time_teacher.staff_id = time_class.staff_id
       ${whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : ''}
       GROUP BY c.offering_id, c.semester_id, co.course_id, co.course_name, co.credit, co.credit_hours, cho.required_weeks,
+               co.dept_id, course_dept.dept_name, current_student.dept_id, student_dept.dept_name,
                c.staff_id, t.name, c.class_time, c.classroom_building_no, c.classroom_room_no, c.capacity, c.status
       ${havingParts.length > 0 ? `HAVING ${havingParts.join(' AND ')}` : ''}
       ORDER BY c.semester_id DESC, co.course_id, t.name`,
-    [studentId, studentId, studentId, ...whereParams]
+    [studentId, studentId, studentId, studentId, ...whereParams]
   );
 
   return success(res, rows);
@@ -347,7 +356,8 @@ export async function myCourses(req: AuthenticatedRequest, res: Response) {
        cs.selection_id, c.offering_id, c.semester_id AS semester, co.course_id, co.course_name,
        co.credit, co.credit_hours, cho.required_weeks, c.staff_id, t.name AS teacher_name, c.class_time,
        CONCAT(c.classroom_building_no, c.classroom_room_no) AS classroom,
-       g.score
+       g.score,
+       CASE WHEN g.score IS NOT NULL AND g.score < 60 THEN 1 ELSE 0 END AS is_failed
      FROM course_selection AS cs
      JOIN course_offerings AS c ON c.offering_id = cs.offering_id
      JOIN course AS co ON co.course_id = c.course_id
@@ -355,7 +365,7 @@ export async function myCourses(req: AuthenticatedRequest, res: Response) {
      JOIN teacher AS t ON t.staff_id = c.staff_id
      LEFT JOIN v_grades AS g ON g.selection_id = cs.selection_id
      WHERE cs.student_id = ? AND c.semester_id = ?
-     ORDER BY c.semester_id DESC, c.class_time`,
+     ORDER BY is_failed DESC, c.semester_id DESC, c.class_time`,
     [studentId, semester]
   );
   return success(res, rows);
@@ -429,7 +439,9 @@ export async function myGrades(req: AuthenticatedRequest, res: Response) {
      LEFT JOIN v_grades AS g ON g.selection_id = cs.selection_id
      WHERE cs.student_id = ?
        ${hideCurrentSemester ? 'AND c.semester_id <> ?' : ''}
-     ORDER BY c.semester_id DESC, co.course_id`,
+     ORDER BY CASE WHEN g.score IS NOT NULL AND g.score < 60 THEN 1 ELSE 0 END DESC,
+              c.semester_id DESC,
+              co.course_id`,
     hideCurrentSemester ? [studentId, currentSemester] : [studentId]
   );
   return success(res, {
