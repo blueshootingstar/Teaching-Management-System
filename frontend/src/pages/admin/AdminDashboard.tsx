@@ -460,40 +460,26 @@ function ResourcePanel({ config, onChanged, systemWindows, onToggleSystemWindow 
 }
 
 function StatisticsPanel() {
-  const [offerings, setOfferings] = useState<AnyRecord[]>([]);
   const [semesters, setSemesters] = useState<AnyRecord[]>([]);
-  const [courseStat, setCourseStat] = useState<AnyRecord | null>(null);
   const [semesterRows, setSemesterRows] = useState<AnyRecord[]>([]);
-  const [rankingRows, setRankingRows] = useState<AnyRecord[]>([]);
-  const [offeringId, setOfferingId] = useState<number | undefined>();
   const [semesterId, setSemesterId] = useState<string | undefined>();
+  const [activeStatsView, setActiveStatsView] = useState<'capacity' | 'grades' | 'departments' | 'teachers'>('capacity');
   const [baseLoading, setBaseLoading] = useState(false);
-  const [courseLoading, setCourseLoading] = useState(false);
   const [semesterLoading, setSemesterLoading] = useState(false);
 
   const loadBase = async () => {
     setBaseLoading(true);
     try {
-      const [offeringData, semesterData, rankingData] = await Promise.all([
-        request.get<AnyRecord[]>('/admin/course-offerings'),
-        request.get<AnyRecord[]>('/admin/semesters'),
-        request.get<AnyRecord[]>('/statistics/course-ranking')
-      ]);
-      const firstOfferingId = offeringData[0]?.offering_id;
+      const semesterData = await request.get<AnyRecord[]>('/admin/semesters');
       const currentSemester = semesterData.find((item) => Number(item.is_current) === 1) || semesterData[0];
       const firstSemesterId = currentSemester?.semester_id;
 
-      setOfferings(offeringData);
       setSemesters(semesterData);
-      setRankingRows(rankingData);
-      setOfferingId(firstOfferingId);
       setSemesterId(firstSemesterId);
 
-      const [courseRows, semesterStatRows] = await Promise.all([
-        firstOfferingId ? request.get<AnyRecord[]>(`/statistics/course/${firstOfferingId}`) : Promise.resolve([]),
-        firstSemesterId ? request.get<AnyRecord[]>(`/statistics/semester/${firstSemesterId}`) : Promise.resolve([])
-      ]);
-      setCourseStat(courseRows[0] || null);
+      const semesterStatRows = firstSemesterId
+        ? await request.get<AnyRecord[]>(`/statistics/semester/${firstSemesterId}`)
+        : [];
       setSemesterRows(semesterStatRows);
     } finally {
       setBaseLoading(false);
@@ -503,20 +489,6 @@ function StatisticsPanel() {
   useEffect(() => {
     loadBase();
   }, []);
-
-  const loadCourseStat = async (targetOfferingId = offeringId) => {
-    if (!targetOfferingId) {
-      setCourseStat(null);
-      return;
-    }
-    setCourseLoading(true);
-    try {
-      const rows = await request.get<AnyRecord[]>(`/statistics/course/${targetOfferingId}`);
-      setCourseStat(rows[0] || null);
-    } finally {
-      setCourseLoading(false);
-    }
-  };
 
   const loadSemesterStat = async (targetSemesterId = semesterId) => {
     if (!targetSemesterId) {
@@ -532,8 +504,159 @@ function StatisticsPanel() {
     }
   };
 
-  const selectedOffering = offerings.find((item) => item.offering_id === offeringId);
   const selectedSemester = semesters.find((item) => item.semester_id === semesterId);
+  const formatPercent = (value: unknown) => `${Number(value || 0).toFixed(1)}%`;
+  const semesterSummary = useMemo(() => {
+    const totalOfferings = semesterRows.length;
+    const totalSelected = semesterRows.reduce((sum, row) => sum + Number(row.selected_count || 0), 0);
+    const totalCapacity = semesterRows.reduce((sum, row) => sum + Number(row.capacity || 0), 0);
+    const totalGraded = semesterRows.reduce((sum, row) => sum + Number(row.graded_count || 0), 0);
+    const totalPendingGrades = semesterRows.reduce((sum, row) => sum + Number(row.pending_grade_count || 0), 0);
+    const openCount = semesterRows.filter((row) => row.status === 'open').length;
+    const fullCount = semesterRows.filter((row) => Number(row.capacity || 0) > 0 && Number(row.selected_count || 0) >= Number(row.capacity || 0)).length;
+    const lowEnrollmentCount = semesterRows.filter((row) => Number(row.selected_count || 0) > 0 && Number(row.selected_count || 0) < 5).length;
+    const emptyEnrollmentCount = semesterRows.filter((row) => Number(row.selected_count || 0) === 0).length;
+    const tightCapacityCount = semesterRows.filter((row) => {
+      const selected = Number(row.selected_count || 0);
+      const remaining = Number(row.remaining_capacity || 0);
+      return selected > 0 && remaining > 0 && remaining <= 5;
+    }).length;
+    const pendingGradeCourseCount = semesterRows.filter((row) => Number(row.pending_grade_count || 0) > 0).length;
+    const closedCount = semesterRows.filter((row) => row.status === 'closed').length;
+
+    return {
+      totalOfferings,
+      openCount,
+      totalSelected,
+      totalCapacity,
+      totalPendingGrades,
+      fullCount,
+      tightCapacityCount,
+      lowEnrollmentCount,
+      emptyEnrollmentCount,
+      pendingGradeCourseCount,
+      closedCount,
+      averageSelected: totalOfferings > 0 ? totalSelected / totalOfferings : 0,
+      utilizationRate: totalCapacity > 0 ? (totalSelected / totalCapacity) * 100 : 0,
+      gradeCompletionRate: totalSelected > 0 ? (totalGraded / totalSelected) * 100 : 0
+    };
+  }, [semesterRows]);
+
+  const capacityAttentionRows = useMemo(
+    () => [...semesterRows]
+      .filter((row) => {
+        const selected = Number(row.selected_count || 0);
+        const capacity = Number(row.capacity || 0);
+        const remaining = Number(row.remaining_capacity || 0);
+        return selected === 0 || (selected > 0 && selected < 5) || (capacity > 0 && selected >= capacity) || (selected > 0 && remaining > 0 && remaining <= 5);
+      })
+      .sort((a, b) => {
+        const score = (row: AnyRecord) => {
+          const selected = Number(row.selected_count || 0);
+          const capacity = Number(row.capacity || 0);
+          const remaining = Number(row.remaining_capacity || 0);
+          if (capacity > 0 && selected >= capacity) return 4;
+          if (selected > 0 && remaining > 0 && remaining <= 5) return 3;
+          if (selected === 0) return 2;
+          if (selected > 0 && selected < 5) return 1;
+          return 0;
+        };
+        return score(b) - score(a) || Number(b.utilization_rate || 0) - Number(a.utilization_rate || 0);
+      }),
+    [semesterRows]
+  );
+
+  const gradePendingRows = useMemo(
+    () => [...semesterRows]
+      .filter((row) => Number(row.pending_grade_count || 0) > 0)
+      .sort((a, b) => Number(b.pending_grade_count || 0) - Number(a.pending_grade_count || 0) || Number(a.grade_completion_rate || 0) - Number(b.grade_completion_rate || 0)),
+    [semesterRows]
+  );
+
+  const teacherRows = useMemo<AnyRecord[]>(() => {
+    const grouped = new Map<string, AnyRecord>();
+    semesterRows.forEach((row) => {
+      const key = String(row.staff_id || row.teacher_name);
+      const current = grouped.get(key) || {
+        staff_id: row.staff_id,
+        teacher_name: row.teacher_name,
+        offering_count: 0,
+        selected_count: 0,
+        capacity: 0,
+        graded_count: 0,
+        pending_grade_count: 0
+      };
+      current.offering_count += 1;
+      current.selected_count += Number(row.selected_count || 0);
+      current.capacity += Number(row.capacity || 0);
+      current.graded_count += Number(row.graded_count || 0);
+      current.pending_grade_count += Number(row.pending_grade_count || 0);
+      grouped.set(key, current);
+    });
+    return Array.from(grouped.values())
+      .map((row) => ({
+        ...row,
+        average_selected: row.offering_count > 0 ? row.selected_count / row.offering_count : 0,
+        utilization_rate: row.capacity > 0 ? (row.selected_count / row.capacity) * 100 : 0,
+        grade_completion_rate: row.selected_count > 0 ? (row.graded_count / row.selected_count) * 100 : 0
+      }))
+      .sort((a: AnyRecord, b: AnyRecord) => Number(b.offering_count || 0) - Number(a.offering_count || 0) || Number(b.selected_count || 0) - Number(a.selected_count || 0));
+  }, [semesterRows]);
+
+  const deptRows = useMemo<AnyRecord[]>(() => {
+    const grouped = new Map<string, AnyRecord>();
+    semesterRows.forEach((row) => {
+      const key = String(row.dept_id || row.dept_name || 'unknown');
+      const current = grouped.get(key) || {
+        dept_id: row.dept_id,
+        dept_name: row.dept_name || '-',
+        offering_count: 0,
+        selected_count: 0,
+        capacity: 0,
+        pending_grade_count: 0
+      };
+      current.offering_count += 1;
+      current.selected_count += Number(row.selected_count || 0);
+      current.capacity += Number(row.capacity || 0);
+      current.pending_grade_count += Number(row.pending_grade_count || 0);
+      grouped.set(key, current);
+    });
+    return Array.from(grouped.values())
+      .map((row) => ({
+        ...row,
+        utilization_rate: row.capacity > 0 ? (row.selected_count / row.capacity) * 100 : 0
+      }))
+      .sort((a: AnyRecord, b: AnyRecord) => Number(b.offering_count || 0) - Number(a.offering_count || 0));
+  }, [semesterRows]);
+
+  const renderCapacityStatus = (_: unknown, record: AnyRecord) => {
+    const selected = Number(record.selected_count || 0);
+    const capacity = Number(record.capacity || 0);
+    const remaining = Number(record.remaining_capacity || 0);
+    if (capacity > 0 && selected >= capacity) return <Tag color="red">已满</Tag>;
+    if (selected > 0 && remaining > 0 && remaining <= 5) return <Tag color="gold">余量紧张</Tag>;
+    if (selected === 0) return <Tag>未选</Tag>;
+    if (selected < 5) return <Tag color="orange">偏少</Tag>;
+    return <Tag color="green">正常</Tag>;
+  };
+  const activeStatsMeta = {
+    capacity: {
+      title: '容量与选课关注',
+      description: '展示已满、余量紧张、低选或空选课程。'
+    },
+    grades: {
+      title: '成绩录入进度',
+      description: '只展示仍有成绩未录入的课程。'
+    },
+    departments: {
+      title: '院系开课汇总',
+      description: '按课程所属院系统计课程供给和容量利用。'
+    },
+    teachers: {
+      title: '教师教学负载',
+      description: '按本学期开课数量和授课人次汇总。'
+    }
+  }[activeStatsView];
 
   return (
     <div className="statistics-dashboard">
@@ -541,126 +664,234 @@ function StatisticsPanel() {
         <div>
           <Typography.Title level={4} style={{ margin: 0 }}>统计分析</Typography.Title>
           <Typography.Text type="secondary">
-            查看课程成绩、学期选课人数和课程平均分排名。
+            围绕当前学期的课程运行、容量风险、成绩录入和教学负载进行监控。
           </Typography.Text>
         </div>
+        <Select
+          style={{ minWidth: 240 }}
+          value={semesterId}
+          placeholder="选择学期"
+          options={semesters.map((item) => ({ label: item.semester_name, value: item.semester_id }))}
+          onChange={(value) => {
+            setSemesterId(value);
+            loadSemesterStat(value);
+          }}
+        />
       </div>
 
       <section className="stats-section">
         <div className="stats-section-header">
           <div>
-            <Typography.Title level={5} style={{ margin: 0 }}>课程成绩概览</Typography.Title>
-            <Typography.Text type="secondary">
-              {selectedOffering
-                ? `${selectedOffering.semester} · ${selectedOffering.course_name} · ${selectedOffering.teacher_name}`
-                : '请选择一条开课记录'}
-            </Typography.Text>
+            <Typography.Title level={5} style={{ margin: 0 }}>{activeStatsMeta.title}</Typography.Title>
+            <Typography.Text type="secondary">{selectedSemester?.semester_name || '请选择学期'} · {activeStatsMeta.description}</Typography.Text>
           </div>
-          <Select
-            showSearch
-            optionFilterProp="label"
-            style={{ minWidth: 340 }}
-            value={offeringId}
-            placeholder="选择开课记录"
-            options={offerings.map((item) => ({
-              label: `${item.semester} ${item.course_name} ${item.teacher_name}`,
-              value: item.offering_id
-            }))}
-            onChange={(value) => {
-              setOfferingId(value);
-              loadCourseStat(value);
-            }}
-          />
+          <div className="stats-detail-switcher">
+            {[
+              ['capacity', '容量与选课'],
+              ['grades', '成绩录入'],
+              ['departments', '院系汇总'],
+              ['teachers', '教师课程量']
+            ].map(([key, label]) => (
+              <Button
+                key={key}
+                type={activeStatsView === key ? 'primary' : 'default'}
+                onClick={() => setActiveStatsView(key as 'capacity' | 'grades' | 'departments' | 'teachers')}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
         </div>
 
-        <div className="stats-grid stats-grid-compact">
-          {[
-            ['选课人数', courseStat?.selected_count || 0],
-            ['已录成绩', courseStat?.graded_count || 0],
-            ['平均分', courseStat?.average_score || 0, 2],
-            ['最高分', courseStat?.max_score || 0],
-            ['最低分', courseStat?.min_score || 0],
-            ['优秀人数', courseStat?.excellent_count || 0]
-          ].map(([title, value, precision]) => (
-            <div className="stat-tile" key={String(title)}>
-              <Statistic
-                loading={courseLoading || baseLoading}
-                title={title}
-                value={Number(value)}
-                precision={typeof precision === 'number' ? precision : undefined}
-              />
+        {activeStatsView === 'capacity' && (
+          <>
+            <div className="stats-grid stats-grid-inline">
+              {[
+                ['开课数', semesterSummary.totalOfferings],
+                ['开放课程', semesterSummary.openCount],
+                ['容量利用率', semesterSummary.utilizationRate, 1, '%'],
+                ['已满课程', semesterSummary.fullCount],
+                ['余量紧张', semesterSummary.tightCapacityCount],
+                ['低选/空选', semesterSummary.lowEnrollmentCount + semesterSummary.emptyEnrollmentCount],
+                ['关闭课程', semesterSummary.closedCount]
+              ].map(([title, value, precision, suffix]) => (
+                <div className="stat-tile" key={String(title)}>
+                  <Statistic
+                    loading={semesterLoading || baseLoading}
+                    title={title}
+                    value={Number(value)}
+                    precision={typeof precision === 'number' ? precision : undefined}
+                    suffix={suffix}
+                  />
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </section>
-
-      <div className="statistics-split">
-        <section className="stats-section">
-          <div className="stats-section-header">
-            <div>
-              <Typography.Title level={5} style={{ margin: 0 }}>学期选课分析</Typography.Title>
-              <Typography.Text type="secondary">
-                {selectedSemester?.semester_name || '请选择学期'}
-              </Typography.Text>
-            </div>
-            <Select
-              style={{ minWidth: 220 }}
-              value={semesterId}
-              placeholder="选择学期"
-              options={semesters.map((item) => ({ label: item.semester_name, value: item.semester_id }))}
-              onChange={(value) => {
-                setSemesterId(value);
-                loadSemesterStat(value);
-              }}
+            <Table
+              rowKey="offering_id"
+              size="small"
+              loading={semesterLoading || baseLoading}
+              style={{ marginTop: 12 }}
+              columns={[
+                { title: '课程号', dataIndex: 'course_id', width: 110 },
+                { title: '课程名', dataIndex: 'course_name' },
+                { title: '教师', dataIndex: 'teacher_name', width: 120 },
+                {
+                  title: '选课/容量',
+                  width: 110,
+                  align: 'center',
+                  render: (_, record) => `${record.selected_count || 0}/${record.capacity || 0}`
+                },
+                { title: '剩余', dataIndex: 'remaining_capacity', width: 80, align: 'center' },
+                {
+                  title: '利用率',
+                  dataIndex: 'utilization_rate',
+                  width: 92,
+                  align: 'right',
+                  render: formatPercent
+                },
+                {
+                  title: '关注点',
+                  width: 100,
+                  align: 'center',
+                  render: renderCapacityStatus
+                }
+              ]}
+              dataSource={capacityAttentionRows}
+              pagination={capacityAttentionRows.length > 8 ? { pageSize: 8, showSizeChanger: false } : false}
             />
-          </div>
-          <Table
-            rowKey="offering_id"
-            size="middle"
-            loading={semesterLoading || baseLoading}
-            columns={[
-              { title: '课程号', dataIndex: 'course_id', width: 110 },
-              { title: '课程名', dataIndex: 'course_name' },
-              { title: '教师', dataIndex: 'teacher_name', width: 120 },
-              { title: '选课人数', dataIndex: 'selected_count', width: 110, align: 'center' }
-            ]}
-            dataSource={semesterRows}
-            pagination={{ pageSize: 8, showSizeChanger: false }}
-          />
-        </section>
+          </>
+        )}
 
-        <section className="stats-section">
-          <div className="stats-section-header">
-            <div>
-              <Typography.Title level={5} style={{ margin: 0 }}>课程平均分排名</Typography.Title>
-              <Typography.Text type="secondary">按已录入成绩的平均分排序。</Typography.Text>
+        {activeStatsView === 'grades' && (
+          <>
+            <div className="stats-grid stats-grid-inline">
+              {[
+                ['待录课程', semesterSummary.pendingGradeCourseCount],
+                ['待录人数', semesterSummary.totalPendingGrades]
+              ].map(([title, value, precision, suffix]) => (
+                <div className="stat-tile" key={String(title)}>
+                  <Statistic
+                    loading={semesterLoading || baseLoading}
+                    title={title}
+                    value={Number(value)}
+                    precision={typeof precision === 'number' ? precision : undefined}
+                    suffix={suffix}
+                  />
+                </div>
+              ))}
             </div>
-          </div>
-          <Table
-            rowKey="course_id"
-            size="middle"
-            loading={baseLoading}
-            columns={[
-              {
-                title: '排名',
-                width: 72,
-                align: 'center',
-                render: (_value, _record, index) => <Tag color={index < 3 ? 'blue' : undefined}>{index + 1}</Tag>
-              },
-              { title: '课程名', dataIndex: 'course_name' },
-              {
-                title: '平均分',
-                dataIndex: 'average_score',
-                width: 100,
-                align: 'right',
-                render: (value) => Number(value || 0).toFixed(2)
-              }
-            ]}
-            dataSource={rankingRows}
-            pagination={{ pageSize: 8, showSizeChanger: false }}
-          />
-        </section>
-      </div>
+            <Table
+              rowKey="offering_id"
+              size="small"
+              loading={semesterLoading || baseLoading}
+              style={{ marginTop: 12 }}
+              columns={[
+                { title: '课程名', dataIndex: 'course_name' },
+                { title: '教师', dataIndex: 'teacher_name', width: 120 },
+                { title: '选课', dataIndex: 'selected_count', width: 72, align: 'center' },
+                { title: '已录', dataIndex: 'graded_count', width: 72, align: 'center' },
+                { title: '未录', dataIndex: 'pending_grade_count', width: 72, align: 'center' },
+                {
+                  title: '完成率',
+                  dataIndex: 'grade_completion_rate',
+                  width: 92,
+                  align: 'right',
+                  render: formatPercent
+                }
+              ]}
+              dataSource={gradePendingRows}
+              pagination={gradePendingRows.length > 8 ? { pageSize: 8, showSizeChanger: false } : false}
+            />
+          </>
+        )}
+
+        {activeStatsView === 'departments' && (
+          <>
+            <div className="stats-grid stats-grid-inline">
+              {[
+                ['院系数', deptRows.length],
+                ['开课数', semesterSummary.totalOfferings],
+                ['容量利用率', semesterSummary.utilizationRate, 1, '%']
+              ].map(([title, value, precision, suffix]) => (
+                <div className="stat-tile" key={String(title)}>
+                  <Statistic
+                    loading={semesterLoading || baseLoading}
+                    title={title}
+                    value={Number(value)}
+                    precision={typeof precision === 'number' ? precision : undefined}
+                    suffix={suffix}
+                  />
+                </div>
+              ))}
+            </div>
+            <Table
+              rowKey={(record) => String(record.dept_id || record.dept_name)}
+              size="small"
+              loading={semesterLoading || baseLoading}
+              style={{ marginTop: 12 }}
+              columns={[
+                { title: '院系', dataIndex: 'dept_name' },
+                { title: '开课数', dataIndex: 'offering_count', width: 90, align: 'center' },
+                { title: '选课人次', dataIndex: 'selected_count', width: 100, align: 'center' },
+                { title: '容量', dataIndex: 'capacity', width: 90, align: 'center' },
+                {
+                  title: '利用率',
+                  dataIndex: 'utilization_rate',
+                  width: 92,
+                  align: 'right',
+                  render: formatPercent
+                },
+                { title: '待录成绩', dataIndex: 'pending_grade_count', width: 100, align: 'center' }
+              ]}
+              dataSource={deptRows}
+              pagination={deptRows.length > 8 ? { pageSize: 8, showSizeChanger: false } : false}
+            />
+          </>
+        )}
+
+        {activeStatsView === 'teachers' && (
+          <>
+            <div className="stats-grid stats-grid-inline">
+              {[
+                ['授课教师', teacherRows.length],
+                ['开课数', semesterSummary.totalOfferings],
+                ['授课人次', semesterSummary.totalSelected],
+                ['待录成绩人数', semesterSummary.totalPendingGrades]
+              ].map(([title, value, precision]) => (
+                <div className="stat-tile" key={String(title)}>
+                  <Statistic
+                    loading={semesterLoading || baseLoading}
+                    title={title}
+                    value={Number(value)}
+                    precision={typeof precision === 'number' ? precision : undefined}
+                  />
+                </div>
+              ))}
+            </div>
+            <Table
+              rowKey={(record) => String(record.staff_id || record.teacher_name)}
+              size="small"
+              loading={semesterLoading || baseLoading}
+              style={{ marginTop: 12 }}
+              columns={[
+                { title: '教师', dataIndex: 'teacher_name' },
+                { title: '开课数', dataIndex: 'offering_count', width: 90, align: 'center' },
+                { title: '授课人次', dataIndex: 'selected_count', width: 100, align: 'center' },
+                {
+                  title: '平均每课',
+                  dataIndex: 'average_selected',
+                  width: 100,
+                  align: 'right',
+                  render: (value) => Number(value || 0).toFixed(1)
+                },
+                { title: '待录成绩', dataIndex: 'pending_grade_count', width: 100, align: 'center' }
+              ]}
+              dataSource={teacherRows}
+              pagination={teacherRows.length > 8 ? { pageSize: 8, showSizeChanger: false } : false}
+            />
+          </>
+        )}
+      </section>
     </div>
   );
 }
@@ -844,7 +1075,11 @@ export default function AdminDashboard() {
           { title: '教师', dataIndex: 'teacher_name' },
           { title: '时间', dataIndex: 'class_time' },
           { title: '教室', dataIndex: 'classroom' },
-          { title: '容量', dataIndex: 'capacity' },
+          {
+            title: '容量',
+            dataIndex: 'capacity',
+            render: (_, record) => `${record.selected_count ?? record.selection_count ?? 0}/${record.capacity ?? 0}`
+          },
           { title: '状态', dataIndex: 'status' }
         ],
         fields: [

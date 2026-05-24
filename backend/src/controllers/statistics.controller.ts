@@ -50,16 +50,28 @@ export async function semesterStatistics(req: Request, res: Response) {
     `SELECT
        c.offering_id,
        c.semester_id AS semester,
+       c.staff_id,
        co.course_id,
        co.course_name,
+       co.dept_id,
+       d.dept_name,
        t.name AS teacher_name,
-       COUNT(cs.selection_id) AS selected_count
+       c.capacity,
+       c.status,
+       COUNT(cs.selection_id) AS selected_count,
+       SUM(CASE WHEN g.score IS NOT NULL THEN 1 ELSE 0 END) AS graded_count,
+       (COUNT(cs.selection_id) - SUM(CASE WHEN g.score IS NOT NULL THEN 1 ELSE 0 END)) AS pending_grade_count,
+       (c.capacity - COUNT(cs.selection_id)) AS remaining_capacity,
+       ROUND(COUNT(cs.selection_id) * 100 / NULLIF(c.capacity, 0), 2) AS utilization_rate,
+       ROUND(SUM(CASE WHEN g.score IS NOT NULL THEN 1 ELSE 0 END) * 100 / NULLIF(COUNT(cs.selection_id), 0), 2) AS grade_completion_rate
      FROM course_offerings AS c
      JOIN course AS co ON co.course_id = c.course_id
+     JOIN department AS d ON d.dept_id = co.dept_id
      JOIN teacher AS t ON t.staff_id = c.staff_id
      LEFT JOIN course_selection AS cs ON cs.offering_id = c.offering_id
+     LEFT JOIN v_grades AS g ON g.selection_id = cs.selection_id
      WHERE c.semester_id = ?
-     GROUP BY c.offering_id, c.semester_id, co.course_id, co.course_name, t.name
+     GROUP BY c.offering_id, c.semester_id, c.staff_id, co.course_id, co.course_name, co.dept_id, d.dept_name, t.name, c.capacity, c.status
      ORDER BY selected_count DESC, co.course_id`,
     [req.params.semesterId]
   );
