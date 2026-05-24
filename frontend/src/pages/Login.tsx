@@ -12,13 +12,22 @@ interface LoginResult {
 
 export default function Login() {
   const navigate = useNavigate();
+  const [form] = Form.useForm();
 
   const onFinish = async (values: { username: string; password: string }) => {
-    const data = await request.post<LoginResult>('/auth/login', values);
-    localStorage.setItem('token', data.token);
-    localStorage.setItem('user', JSON.stringify(data.user));
-    message.success('登录成功');
-    navigate(`/${data.user.role}`, { replace: true });
+    try {
+      const data = await request.post<LoginResult>('/auth/login', values);
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      message.success('登录成功');
+      navigate(`/${data.user.role}`, { replace: true });
+    } catch {
+      const msg = '账号或密码错误';
+      message.error(msg);
+      form.setFields([
+        { name: 'password', errors: [msg] }
+      ]);
+    }
   };
 
   return (
@@ -28,7 +37,7 @@ export default function Login() {
         <Typography.Text type="secondary" style={{ display: 'block', textAlign: 'center', marginBottom: 24, fontSize: 15 }}>
           欢迎登录，请验证您的身份
         </Typography.Text>
-        <Form layout="vertical" className="login-form" onFinish={onFinish}>
+        <Form form={form} layout="vertical" className="login-form" onFinish={onFinish}>
           <Form.Item name="username" rules={[{ required: true, message: '请输入账号' }]}>
             <Input size="large" prefix={<UserOutlined style={{ color: '#94a3b8' }} />} placeholder="账号 (admin / 学号1xxx / 教工号0xxx)" />
           </Form.Item>

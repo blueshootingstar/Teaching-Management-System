@@ -28,12 +28,16 @@ http.interceptors.response.use(
   },
   (error) => {
     const msg = error.response?.data?.message || error.message || '网络错误';
+    const isLoginRequest = error.config?.url === '/auth/login';
     if (error.response?.status === 401) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      window.location.href = '/login';
+      if (!isLoginRequest) message.error(msg);
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
     } else {
-      message.error(msg);
+      if (!isLoginRequest) message.error(msg);
     }
     return Promise.reject(error);
   }
