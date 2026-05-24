@@ -1,4 +1,4 @@
-import { DeleteOutlined, ReloadOutlined, SearchOutlined, SelectOutlined } from '@ant-design/icons';
+import { DeleteOutlined, SearchOutlined, SelectOutlined } from '@ant-design/icons';
 import {
   Alert,
   Button,
@@ -160,13 +160,6 @@ export default function StudentDashboard() {
   const resetFilters = async () => {
     setFilters(initialFilters);
     await loadAvailable(initialFilters);
-  };
-
-  const reloadAvailableArea = async () => {
-    const isSelectionOpen = await loadSelectionWindow();
-    if (isSelectionOpen) {
-      await loadAvailable();
-    }
   };
 
   const selectionBlockedReason = selectionEligibility?.can_select_course === false
@@ -366,7 +359,6 @@ export default function StudentDashboard() {
             <div className="page-card">
               <div className="toolbar">
                 <Typography.Title level={4}>当前学期课程查询</Typography.Title>
-                <Button icon={<ReloadOutlined />} onClick={reloadAvailableArea} />
               </div>
               {selectionWindowOpen === null ? (
                 <Alert type="info" showIcon message="正在读取选课状态" />
@@ -439,7 +431,6 @@ export default function StudentDashboard() {
                       options={weekOptions}
                       onChange={changeCourseWeek}
                     />
-                    <Button icon={<ReloadOutlined />} onClick={() => loadTimetable()} />
                   </Space>
                 </div>
                 <div className="schedule-table-wrap">
@@ -496,7 +487,6 @@ export default function StudentDashboard() {
                     options={gradeSemesterOptions}
                     onChange={setGradeSemester}
                   />
-                  <Button icon={<ReloadOutlined />} onClick={loadGrades} />
                 </Space>
               </div>
               {gradeQueryMessage && (

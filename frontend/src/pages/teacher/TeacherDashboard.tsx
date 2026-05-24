@@ -1,7 +1,6 @@
 import {
   BarChartOutlined,
   EditOutlined,
-  ReloadOutlined,
   SwapOutlined,
   TeamOutlined
 } from '@ant-design/icons';
@@ -380,7 +379,6 @@ export default function TeacherDashboard() {
                       options={weekOptions}
                       onChange={changeScheduleWeek}
                     />
-                    <Button icon={<ReloadOutlined />} onClick={() => loadTimetable()} />
                   </Space>
                 </div>
                 <div className="schedule-table-wrap">
@@ -443,7 +441,6 @@ export default function TeacherDashboard() {
                         style={{ width: 260 }}
                       />
                       <Button onClick={() => setCourseKeyword('')}>重置</Button>
-                      <Button icon={<ReloadOutlined />} onClick={() => loadCourses()} />
                     </Space>
                   </div>
                   <Table rowKey="offering_id" columns={courseColumns} dataSource={filteredCourseRows} scroll={{ x: 1000 }} />

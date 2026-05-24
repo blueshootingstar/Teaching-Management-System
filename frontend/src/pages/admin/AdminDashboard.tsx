@@ -1,4 +1,4 @@
-import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
 import {
   Button,
   DatePicker,
@@ -380,7 +380,6 @@ function ResourcePanel({ config, onChanged, systemWindows, onToggleSystemWindow 
           )}
           <Input.Search allowClear placeholder={`搜索${config.title}`} value={keyword} onChange={(event) => setKeyword(event.target.value)} style={{ width: 280 }} />
           <Button onClick={() => setKeyword('')}>重置</Button>
-          <Button icon={<ReloadOutlined />} onClick={load} />
           <Button
             type="primary"
             icon={<PlusOutlined />}
@@ -533,10 +532,6 @@ function StatisticsPanel() {
     }
   };
 
-  const reloadAll = async () => {
-    await loadBase();
-  };
-
   const selectedOffering = offerings.find((item) => item.offering_id === offeringId);
   const selectedSemester = semesters.find((item) => item.semester_id === semesterId);
 
@@ -549,9 +544,6 @@ function StatisticsPanel() {
             查看课程成绩、学期选课人数和课程平均分排名。
           </Typography.Text>
         </div>
-        <Button icon={<ReloadOutlined />} loading={baseLoading} onClick={reloadAll}>
-          刷新
-        </Button>
       </div>
 
       <section className="stats-section">
