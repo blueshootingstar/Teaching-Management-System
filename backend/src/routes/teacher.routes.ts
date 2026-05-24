@@ -8,6 +8,7 @@ const router = Router();
 
 router.use(authMiddleware, requireRole('teacher'));
 
+router.get('/profile', asyncHandler(teacher.profile));
 router.get('/semesters', asyncHandler(teacher.semesters));
 router.get('/grade-upload-window', asyncHandler(teacher.gradeUploadWindow));
 router.get('/my-courses', asyncHandler(teacher.myCourses));

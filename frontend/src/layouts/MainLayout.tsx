@@ -1,9 +1,9 @@
 import { LogoutOutlined, ReadOutlined } from '@ant-design/icons';
 import { Button, Form, Input, Layout, Modal, Space, Typography, message } from 'antd';
 import type { ReactNode } from 'react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { CurrentUser } from '../types';
+import type { AnyRecord, CurrentUser } from '../types';
 import MailboxDrawer from '../pages/shared/MailboxDrawer';
 import request from '../api/request';
 
@@ -12,8 +12,19 @@ const { Header, Content } = Layout;
 export default function MainLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const user = JSON.parse(localStorage.getItem('user') || '{}') as CurrentUser;
+  const [profile, setProfile] = useState<AnyRecord | null>(null);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [passwordForm] = Form.useForm();
+
+  useEffect(() => {
+    if (!user.userId || !['student', 'teacher'].includes(user.role)) {
+      setProfile(null);
+      return;
+    }
+    request.get<AnyRecord | null>(`/${user.role}/profile`)
+      .then(setProfile)
+      .catch(() => setProfile(null));
+  }, [user.role, user.userId]);
 
   const logout = () => {
     localStorage.removeItem('token');
@@ -36,6 +47,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       }
     }
   };
+  const profileItems = getHeaderProfileItems(user, profile);
 
   return (
     <Layout className="app-shell">
@@ -45,9 +57,21 @@ export default function MainLayout({ children }: { children: ReactNode }) {
           <Typography.Text className="app-title">教学事务管理系统</Typography.Text>
         </div>
         <Space className="app-user" size={12}>
-          <Typography.Text className="app-user-name">
-            {user.displayName} · {user.role}
-          </Typography.Text>
+          <div className="app-user-profile">
+            <Typography.Text className="app-user-name">
+              {user.displayName}
+            </Typography.Text>
+            {profileItems.length > 0 && (
+              <div className="app-profile-line">
+                {profileItems.map(([label, value]) => (
+                  <span key={label}>
+                    <strong>{label}</strong>
+                    {value}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
           {user.userId && <MailboxDrawer user={user} />}
           <Button onClick={() => setPasswordOpen(true)}>修改密码</Button>
           <Button icon={<LogoutOutlined />} onClick={logout}>
@@ -78,4 +102,22 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       </Modal>
     </Layout>
   );
+}
+
+function getHeaderProfileItems(user: CurrentUser, profile: AnyRecord | null): Array<[string, string]> {
+  if (user.role === 'student') {
+    return [
+      ['学号', String(profile?.student_id || user.studentId || '-')],
+      ['院系', String(profile?.dept_name || '-')],
+      ['学籍', String(profile?.status_name || '-')]
+    ];
+  }
+  if (user.role === 'teacher') {
+    return [
+      ['教工号', String(profile?.staff_id || user.staffId || '-')],
+      ['院系', String(profile?.dept_name || '-')],
+      ['职称', String(profile?.professional_rank_name || '-')]
+    ];
+  }
+  return [];
 }

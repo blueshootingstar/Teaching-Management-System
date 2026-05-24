@@ -118,6 +118,30 @@ export async function semesters(req: AuthenticatedRequest, res: Response) {
   return success(res, rows);
 }
 
+export async function profile(req: AuthenticatedRequest, res: Response) {
+  const staffId = requireStaffId(req, res);
+  if (!staffId) return null;
+
+  const rows = await query<RowDataPacket[]>(
+    `SELECT
+       t.staff_id,
+       t.name,
+       t.sex,
+       DATE_FORMAT(t.date_of_birth, '%Y-%m-%d') AS date_of_birth,
+       t.dept_id,
+       d.dept_name,
+       t.professional_rank_id,
+       pr.rank_name AS professional_rank_name
+     FROM teacher AS t
+     JOIN department AS d ON d.dept_id = t.dept_id
+     JOIN professional_ranks AS pr ON pr.rank_id = t.professional_rank_id
+     WHERE t.staff_id = ?
+     LIMIT 1`,
+    [staffId]
+  );
+  return success(res, rows[0] || null);
+}
+
 export async function gradeUploadWindow(req: AuthenticatedRequest, res: Response) {
   const staffId = requireStaffId(req, res);
   if (!staffId) return null;

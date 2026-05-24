@@ -65,6 +65,33 @@ export async function semesters(req: AuthenticatedRequest, res: Response) {
   return success(res, rows);
 }
 
+export async function profile(req: AuthenticatedRequest, res: Response) {
+  const studentId = requireStudentId(req, res);
+  if (!studentId) return null;
+
+  const rows = await query<RowDataPacket[]>(
+    `SELECT
+       s.student_id,
+       s.name,
+       s.sex,
+       DATE_FORMAT(s.date_of_birth, '%Y-%m-%d') AS date_of_birth,
+       s.native_place,
+       s.mobile_phone,
+       s.dept_id,
+       d.dept_name,
+       s.status_code,
+       ss.status_name,
+       ss.can_select_course
+     FROM student AS s
+     JOIN department AS d ON d.dept_id = s.dept_id
+     JOIN student_statuses AS ss ON ss.status_code = s.status_code
+     WHERE s.student_id = ?
+     LIMIT 1`,
+    [studentId]
+  );
+  return success(res, rows[0] || null);
+}
+
 export async function courseSelectionWindow(req: AuthenticatedRequest, res: Response) {
   const studentId = requireStudentId(req, res);
   if (!studentId) return null;

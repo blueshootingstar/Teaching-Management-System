@@ -393,14 +393,14 @@ export default function StudentDashboard() {
 
   return (
     <Tabs
-      activeKey={activeTab}
-      onChange={setActiveTab}
-      items={[
-        {
-          key: 'available',
-          label: '可选课程',
-          children: (
-            <div className="page-card">
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        items={[
+          {
+            key: 'available',
+            label: '可选课程',
+            children: (
+              <div className="page-card">
               <div className="toolbar">
                 <Typography.Title level={4}>当前学期课程查询</Typography.Title>
               </div>
@@ -462,14 +462,14 @@ export default function StudentDashboard() {
                   description="请等待管理员开启选课后再查询和选择课程。"
                 />
               )}
-            </div>
-          )
-        },
-        {
-          key: 'courses',
-          label: '我的课表',
-          children: (
-            <Space direction="vertical" size="large" style={{ width: '100%' }}>
+              </div>
+            )
+          },
+          {
+            key: 'courses',
+            label: '我的课表',
+            children: (
+              <Space direction="vertical" size="large" style={{ width: '100%' }}>
               <div className="page-card">
                 <div className="toolbar">
                   <Typography.Title level={4}>周课程表</Typography.Title>
@@ -535,15 +535,15 @@ export default function StudentDashboard() {
                 )}
                 <Table rowKey="selection_id" columns={courseColumns} dataSource={courseRows} scroll={{ x: 1000 }} />
               </div>
-            </Space>
-          )
-        },
-        {
-          key: 'grades',
-          label: '个人成绩',
-          forceRender: true,
-          children: (
-            <div className="page-card">
+              </Space>
+            )
+          },
+          {
+            key: 'grades',
+            label: '个人成绩',
+            forceRender: true,
+            children: (
+              <div className="page-card">
               <div className="toolbar">
                 <Typography.Title level={4}>个人成绩</Typography.Title>
                 <Space wrap>
@@ -570,10 +570,10 @@ export default function StudentDashboard() {
                 <Statistic title={creditSummaryTitle} value={creditSummary} />
               </div>
               <Table rowKey="selection_id" columns={gradeColumns} dataSource={visibleGrades} scroll={{ x: 1000 }} />
-            </div>
-          )
-        }
-      ]}
+              </div>
+            )
+          }
+        ]}
     />
   );
 }

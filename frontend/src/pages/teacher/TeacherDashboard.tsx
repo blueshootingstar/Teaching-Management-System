@@ -356,14 +356,14 @@ export default function TeacherDashboard() {
   return (
     <>
       <Tabs
-        activeKey={activeTab}
-        onChange={setActiveTab}
-        items={[
-          {
-            key: 'schedule',
-            label: '上课表',
-            children: (
-              <div className="page-card">
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={[
+            {
+              key: 'schedule',
+              label: '上课表',
+              children: (
+                <div className="page-card">
                 <div className="toolbar">
                   <Typography.Title level={4}>周上课表</Typography.Title>
                   <Space wrap>
@@ -415,14 +415,14 @@ export default function TeacherDashboard() {
                     </tbody>
                   </table>
                 </div>
-              </div>
-            )
-          },
-          {
-            key: 'courses',
-            label: '授课课程',
-            children: (
-              <Space direction="vertical" size="large" style={{ width: '100%' }}>
+                </div>
+              )
+            },
+            {
+              key: 'courses',
+              label: '授课课程',
+              children: (
+                <Space direction="vertical" size="large" style={{ width: '100%' }}>
                 <div className="page-card">
                   <div className="toolbar">
                     <Typography.Title level={4}>我的授课课程</Typography.Title>
@@ -481,10 +481,10 @@ export default function TeacherDashboard() {
                     failRate={failRate}
                   />
                 )}
-              </Space>
-            )
-          }
-        ]}
+                </Space>
+              )
+            }
+          ]}
       />
       <Modal title="录入/修改成绩" open={!!gradeRecord} onOk={saveGrade} onCancel={() => setGradeRecord(null)}>
         <Form form={gradeForm} layout="vertical">

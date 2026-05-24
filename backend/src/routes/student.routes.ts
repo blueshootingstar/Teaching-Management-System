@@ -8,6 +8,7 @@ const router = Router();
 
 router.use(authMiddleware, requireRole('student'));
 
+router.get('/profile', asyncHandler(student.profile));
 router.get('/semesters', asyncHandler(student.semesters));
 router.get('/course-selection-window', asyncHandler(student.courseSelectionWindow));
 router.get('/available-courses', asyncHandler(student.availableCourses));
