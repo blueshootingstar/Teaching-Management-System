@@ -24,7 +24,8 @@ import GpaTrendChart from './GpaTrendChart';
 const initialFilters = {
   keyword: '',
   hasCapacity: false,
-  onlyUnselected: false
+  onlyUnselected: false,
+  noTimeConflict: false
 };
 
 const weekdays = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'];
@@ -65,13 +66,16 @@ export default function StudentDashboard() {
       params: {
         keyword: nextFilters.keyword || undefined,
         hasCapacity: nextFilters.hasCapacity || undefined,
-        onlyUnselected: nextFilters.onlyUnselected || undefined
+        onlyUnselected: nextFilters.onlyUnselected || undefined,
+        noTimeConflict: nextFilters.noTimeConflict || undefined
       }
     });
+    const applyClientFilters = (rows: AnyRecord[]) =>
+      nextFilters.noTimeConflict ? rows.filter((row) => Number(row.time_conflicted) !== 1) : rows;
     if (Array.isArray(data)) {
-      setAvailableRows(data);
+      setAvailableRows(applyClientFilters(data));
     } else {
-      setAvailableRows(data.courses || []);
+      setAvailableRows(applyClientFilters(data.courses || []));
       setSelectionEligibility(data.eligibility || null);
     }
   };
@@ -446,6 +450,12 @@ export default function StudentDashboard() {
                       onChange={(event) => setFilters((prev) => ({ ...prev, onlyUnselected: event.target.checked }))}
                     >
                       未选
+                    </Checkbox>
+                    <Checkbox
+                      checked={filters.noTimeConflict}
+                      onChange={(event) => setFilters((prev) => ({ ...prev, noTimeConflict: event.target.checked }))}
+                    >
+                      时间不冲突
                     </Checkbox>
                     <Button type="primary" icon={<SearchOutlined />} onClick={() => loadAvailable()}>
                       查询

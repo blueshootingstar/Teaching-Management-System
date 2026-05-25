@@ -244,6 +244,7 @@ DROP TRIGGER IF EXISTS trg_substitution_requests_before_update;
 
 DELIMITER $$
 
+-- 学生选课后，自动创建对应的成绩记录。
 CREATE TRIGGER trg_course_selection_after_insert
 AFTER INSERT ON course_selection
 FOR EACH ROW
@@ -254,10 +255,12 @@ BEGIN
     selection_id = VALUES(selection_id);
 END $$
 
+-- 新增代课申请前，先校验申请是否合法。
 CREATE TRIGGER trg_substitution_requests_before_insert
 BEFORE INSERT ON substitution_requests
 FOR EACH ROW
 BEGIN
+  -- 申请人必须是该开课记录的原任课教师。
   IF NOT EXISTS (
     SELECT 1
     FROM mail_items AS mi
@@ -270,6 +273,7 @@ BEGIN
       SET MESSAGE_TEXT = 'substitution request sender must own the offering';
   END IF;
 
+  -- 代课教师不能和原任课教师相同。
   IF EXISTS (
     SELECT 1
     FROM course_offerings
@@ -280,6 +284,7 @@ BEGIN
       SET MESSAGE_TEXT = 'substitute teacher must be different from original teacher';
   END IF;
 
+  -- 代课周次不能超过该课程的实际授课周数。
   IF NOT EXISTS (
     SELECT 1
     FROM course_offerings AS co
@@ -292,6 +297,7 @@ BEGIN
       SET MESSAGE_TEXT = 'substitution week exceeds course required weeks';
   END IF;
 
+  -- 同一门开课在同一周只能存在一个待处理或已接受的代课申请。
   IF NEW.status IN ('pending', 'accepted') AND EXISTS (
     SELECT 1
     FROM substitution_requests
@@ -304,10 +310,12 @@ BEGIN
   END IF;
 END $$
 
+-- 更新代课申请前，再次校验申请是否合法。
 CREATE TRIGGER trg_substitution_requests_before_update
 BEFORE UPDATE ON substitution_requests
 FOR EACH ROW
 BEGIN
+  -- 申请人仍然必须是该开课记录的原任课教师。
   IF NOT EXISTS (
     SELECT 1
     FROM mail_items AS mi
@@ -320,6 +328,7 @@ BEGIN
       SET MESSAGE_TEXT = 'substitution request sender must own the offering';
   END IF;
 
+  -- 更新后，代课教师也不能变成原任课教师。
   IF EXISTS (
     SELECT 1
     FROM course_offerings
@@ -330,6 +339,7 @@ BEGIN
       SET MESSAGE_TEXT = 'substitute teacher must be different from original teacher';
   END IF;
 
+  -- 更新后的代课周次仍然不能超过课程实际授课周数。
   IF NOT EXISTS (
     SELECT 1
     FROM course_offerings AS co
@@ -342,6 +352,7 @@ BEGIN
       SET MESSAGE_TEXT = 'substitution week exceeds course required weeks';
   END IF;
 
+  -- 排除当前申请自身后，同一开课同一周不能有其他待处理或已接受的代课申请。
   IF NEW.status IN ('pending', 'accepted') AND EXISTS (
     SELECT 1
     FROM substitution_requests

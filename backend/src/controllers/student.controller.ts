@@ -123,6 +123,7 @@ export async function availableCourses(req: AuthenticatedRequest, res: Response)
   const keyword = String(req.query.keyword || '').trim();
   const hasCapacity = req.query.hasCapacity === 'true' || req.query.hasCapacity === '1';
   const onlyUnselected = req.query.onlyUnselected === 'true' || req.query.onlyUnselected === '1';
+  const noTimeConflict = req.query.noTimeConflict === 'true' || req.query.noTimeConflict === '1';
 
   const whereParts = ['c.semester_id = ?'];
   const whereParams: Array<string | number> = [semester];
@@ -137,6 +138,9 @@ export async function availableCourses(req: AuthenticatedRequest, res: Response)
   }
   if (onlyUnselected) {
     havingParts.push('MAX(mine.selection_id) IS NULL');
+  }
+  if (noTimeConflict) {
+    havingParts.push('MAX(time_class.offering_id) IS NULL');
   }
 
   const rows = await query<RowDataPacket[]>(
