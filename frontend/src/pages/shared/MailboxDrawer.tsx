@@ -51,11 +51,6 @@ function itemTitle(item: AnyRecord) {
   return `${item.requester_teacher_name || '教师'} 请求第 ${item.week_no} 周代课`;
 }
 
-function itemSummary(item: AnyRecord) {
-  if (item.item_type === 'notification') return item.content || '';
-  return `${item.course_name || '-'} ${item.semester || ''} ${item.class_time || ''}`;
-}
-
 export default function MailboxDrawer({ user }: MailboxDrawerProps) {
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<AnyRecord[]>([]);
@@ -144,11 +139,12 @@ export default function MailboxDrawer({ user }: MailboxDrawerProps) {
 
   const mailboxList = useMemo(() => (
     <List
+      className="mailbox-list"
       dataSource={rows}
       locale={{ emptyText: '暂无消息' }}
       renderItem={(item) => (
         <List.Item
-          className={!item.read_at ? 'mailbox-unread' : undefined}
+          className={`mailbox-item${!item.read_at ? ' mailbox-unread' : ''}`}
           onClick={() => selectMail(item)}
           actions={[
             <Tag key="type" color={item.item_type === 'notification' ? 'green' : 'orange'}>
@@ -166,7 +162,6 @@ export default function MailboxDrawer({ user }: MailboxDrawerProps) {
             description={
               <Space direction="vertical" size={2}>
                 <Typography.Text type="secondary">{item.sender_name || '-'} · {formatTime(item.created_at)}</Typography.Text>
-                <Typography.Text ellipsis>{itemSummary(item)}</Typography.Text>
               </Space>
             }
           />
